@@ -1,0 +1,10 @@
+accelerate~=0.4.0
+numpy~=1.21.1
+pydantic~=1.8.2
+seqeval~=0.0.10
+torch~=1.9.0
+transformers~=4.10.0
+networkx~=2.6.2
+stanza~=1.2.3
+bert4keras~=0.10.7
+Keras~=2.3.1
