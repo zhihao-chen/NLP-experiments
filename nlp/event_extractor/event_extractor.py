@@ -29,7 +29,7 @@ from transformers import get_scheduler
 
 from nlp.models.bert_for_ee import MODEL_TYPE_CLASSES
 from nlp.models.bert_for_ee_tplinker import TpLinkerForEE
-from nlp.utils.arguments import DataAndTrainArguments
+from nlp.utils.ee_arguments import DataAndTrainArguments
 from nlp.tools.common import init_logger, prepare_device, seed_everything
 from nlp.processors.ee_seq import EEProcessor, convert_examples_to_features, collate_fn, tokenize
 from nlp.processors.utils_ee import get_argument_for_seq

@@ -10,7 +10,7 @@
 ======================================
 """
 from nlp.event_extractor.event_extractor import EventExtractor
-from nlp.utils.arguments import DataAndTrainArguments
+from nlp.utils.ee_arguments import DataAndTrainArguments
 
 config = {
     'task_name': 'ner',  # ner

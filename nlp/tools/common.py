@@ -1,18 +1,63 @@
 import os
 import re
 import random
-import torch
-import numpy as np
 import json
 import pickle
-import torch.nn as nn
 from collections import OrderedDict
 from pathlib import Path
 import logging
 from typing import Union, List
-import unicodedata
+import shutil
+
+import torch
+import numpy as np
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
 
 LOGGER = logging.getLogger()
+
+
+def init_summary_writer(log_dir):
+    writer = SummaryWriter(log_dir=log_dir)
+    return writer
+
+
+def sorted_checkpoints(output_dir=None, checkpoint_prefix="checkpoint", use_mtime=False) -> List[str]:
+    ordering_and_checkpoint_path = []
+
+    glob_checkpoints = [str(x) for x in Path(output_dir).glob(f"{checkpoint_prefix}-*")]
+
+    for path in glob_checkpoints:
+        if use_mtime:
+            ordering_and_checkpoint_path.append((os.path.getmtime(path), path))
+        else:
+            regex_match = re.match(f".*{checkpoint_prefix}-([0-9]+)", path)
+            if regex_match is not None and regex_match.groups() is not None:
+                ordering_and_checkpoint_path.append((int(regex_match.groups()[0]), path))
+
+    checkpoints_sorted = sorted(ordering_and_checkpoint_path)
+    checkpoints_sorted = [checkpoint[1] for checkpoint in checkpoints_sorted]
+    return checkpoints_sorted
+
+
+def rotate_checkpoints(save_total_limit, use_mtime=False, output_dir=None) -> None:
+    if save_total_limit is None or save_total_limit <= 0:
+        return
+
+    # Check if we should delete older checkpoint(s)
+    checkpoints_sorted = sorted_checkpoints(use_mtime=use_mtime, output_dir=output_dir)
+    if len(checkpoints_sorted) <= save_total_limit:
+        return
+
+    # If save_total_limit=1 with load_best_model_at_end=True, we could end up deleting the last checkpoint, which
+    # we don't do to allow resuming.
+    save_total_limit = save_total_limit
+
+    number_of_checkpoints_to_delete = max(0, len(checkpoints_sorted) - save_total_limit)
+    checkpoints_to_be_deleted = checkpoints_sorted[:number_of_checkpoints_to_delete]
+    for checkpoint in checkpoints_to_be_deleted:
+        LOGGER.info(f"Deleting older checkpoint [{checkpoint}] due to args.save_total_limit")
+        shutil.rmtree(checkpoint)
 
 
 def print_config(config):

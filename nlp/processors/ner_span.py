@@ -255,9 +255,9 @@ class CluenerProcessor(DataProcessor):
         """See base class."""
         return self._create_examples(self._read_json(os.path.join(self.data_dir, "dev.json")), "dev")
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self):
         """See base class."""
-        return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")), "test")
+        return self._create_examples(self._read_json(os.path.join(self.data_dir, "test.json")), "test")
 
     def get_labels(self):
         """See base class."""
@@ -306,12 +306,12 @@ class NerProcessor(DataProcessor):
         elif os.path.exists(os.path.join(self.data_dir, "dev.txt")):
             return self._create_examples(self._read_text(os.path.join(self.data_dir, "dev.txt")), "dev")
 
-    def get_test_examples(self, data_dir):
+    def get_test_examples(self):
         """See base class."""
-        if os.path.exists(os.path.join(data_dir, "test.json")):
-            return self._create_examples(self._read_json(os.path.join(data_dir, "test.json")), "test")
-        elif os.path.exists(os.path.join(data_dir, "test.txt")):
-            return self._create_examples(self._read_text(os.path.join(data_dir, "test.txt")), "test")
+        if os.path.exists(os.path.join(self.data_dir, "test.json")):
+            return self._create_examples(self._read_json(os.path.join(self.data_dir, "test.json")), "test")
+        elif os.path.exists(os.path.join(self.data_dir, "test.txt")):
+            return self._create_examples(self._read_text(os.path.join(self.data_dir, "test.txt")), "test")
 
     def get_labels(self):
         """See base class."""

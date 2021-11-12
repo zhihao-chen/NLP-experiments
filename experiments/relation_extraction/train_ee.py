@@ -29,7 +29,8 @@ from nlp.processors.ee_seq import convert_examples_to_features, EEProcessor, col
 from nlp.processors.utils_ee import get_argument_for_seq
 from nlp.models.bert_for_ee import MODEL_TYPE_CLASSES
 from nlp.metrics.metric import get_prf_scores
-from nlp.tools.common import init_logger, seed_everything, prepare_device, is_all_alpha
+from nlp.tools.common import init_logger, seed_everything, prepare_device
+from nlp.processors.preprocess import is_all_alpha
 from experiments.train_args import get_argparse
 
 

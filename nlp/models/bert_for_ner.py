@@ -40,7 +40,8 @@ class BertSoftmaxForNer(BertPreTrainedModel):
         sequence_output = outputs[0]
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        # outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        outputs = {"logits": logits}
         if labels is not None:
             assert self.loss_type in ['lsr', 'focal', 'ce']
             if self.loss_type == 'lsr':
@@ -57,8 +58,8 @@ class BertSoftmaxForNer(BertPreTrainedModel):
                 loss = loss_fct(active_logits, active_labels)
             else:
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = (loss,) + outputs
-        return outputs  # (loss), scores, (hidden_states), (attentions)
+            outputs["loss"] = loss
+        return outputs
 
 
 class BertCrfForNer(BertPreTrainedModel):
@@ -87,11 +88,11 @@ class BertCrfForNer(BertPreTrainedModel):
             sequence_output, _ = self.lstm(sequence_output)
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
-        outputs = (logits,)
+        outputs = {"logits": logits}
         if labels is not None:
             loss = -1 * self.crf(emissions=logits, tags=labels, mask=attention_mask)
-            outputs = (loss,)+outputs
-        return outputs  # (loss), scores
+            outputs["loss"] = loss
+        return outputs
 
 
 class BertSpanForNer(BertPreTrainedModel):
@@ -134,7 +135,8 @@ class BertSpanForNer(BertPreTrainedModel):
             if not self.soft_label:
                 label_logits = torch.argmax(label_logits, -1).unsqueeze(2).float()
         end_logits = self.end_fc(sequence_output, label_logits)
-        outputs = (start_logits, end_logits,) + outputs[2:]
+        # outputs = (start_logits, end_logits,) + outputs[2:]
+        outputs = {"start_logits": start_logits, "end_logits": end_logits}
 
         if start_positions is not None and end_positions is not None:
             assert self.loss_type in ['lsr', 'focal', 'ce']
@@ -156,7 +158,8 @@ class BertSpanForNer(BertPreTrainedModel):
             start_loss = loss_fct(active_start_logits, active_start_labels)
             end_loss = loss_fct(active_end_logits, active_end_labels)
             total_loss = (start_loss + end_loss) / 2
-            outputs = (total_loss,) + outputs
+            # outputs = (total_loss,) + outputs
+            outputs["loss"] = total_loss
         return outputs
 
 
@@ -177,7 +180,8 @@ class AlbertSoftmaxForNer(AlbertPreTrainedModel):
         sequence_output = outputs[0]
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
-        outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        # outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
+        outputs = {"logits": logits}
         if labels is not None:
             assert self.loss_type in ['lsr', 'focal', 'ce']
             if self.loss_type == 'lsr':
@@ -194,7 +198,8 @@ class AlbertSoftmaxForNer(AlbertPreTrainedModel):
                 loss = loss_fct(active_logits, active_labels)
             else:
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            outputs = (loss,) + outputs
+            # outputs = (loss,) + outputs
+            outputs["loss"] = loss
         return outputs  # (loss), scores, (hidden_states), (attentions)
 
 
@@ -212,10 +217,12 @@ class AlbertCrfForNer(AlbertPreTrainedModel):
         sequence_output = outputs[0]
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
-        outputs = (logits,)
+        # outputs = (logits,)
+        outputs = {"logits": logits}
         if labels is not None:
             loss = self.crf(emissions=logits, tags=labels, mask=attention_mask)
-            outputs = (-1*loss,)+outputs
+            loss = -1 * loss
+            outputs["loss"] = loss
         return outputs  # (loss), scores
 
 
@@ -254,8 +261,8 @@ class AlbertSpanForNer(AlbertPreTrainedModel):
             if not self.soft_label:
                 label_logits = torch.argmax(label_logits, -1).unsqueeze(2).float()
         end_logits = self.end_fc(sequence_output, label_logits)
-        outputs = (start_logits, end_logits,) + outputs[2:]
-
+        # outputs = (start_logits, end_logits,) + outputs[2:]
+        outputs = {"start_logits": start_logits, "end_logits": end_logits}
         if start_positions is not None and end_positions is not None:
             assert self.loss_type in ['lsr', 'focal', 'ce']
             if self.loss_type == 'lsr':
@@ -275,5 +282,6 @@ class AlbertSpanForNer(AlbertPreTrainedModel):
             start_loss = loss_fct(active_start_logits, active_start_labels)
             end_loss = loss_fct(active_end_logits, active_end_labels)
             total_loss = (start_loss + end_loss) / 2
-            outputs = (total_loss,) + outputs
+            # outputs = (total_loss,) + outputs
+            outputs["loss"] = total_loss
         return outputs
