@@ -15,7 +15,8 @@ import torch.nn.functional as func
 from transformers import (BertPreTrainedModel, BertModel, AlbertModel, AlbertPreTrainedModel, RoFormerModel)
 
 from nlp.losses.loss import LabelSmoothingCrossEntropy, FocalLoss
-from nlp.models.layers import CRF, PoolerEndLogits, PoolerStartLogits
+from nlp.layers.crf import CRF
+from nlp.layers.linears import PoolerStartLogits, PoolerEndLogits
 from nlp.models.nezha import NeZhaModel
 
 

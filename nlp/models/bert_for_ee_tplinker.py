@@ -18,7 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as func
 from transformers import BertModel
 
-from nlp.models.utils import GraphConvLayer, Indexer, MyMatrix, SingleSourceHandshakingKernel, LayerNorm
+from nlp.models.model_util import GraphConvLayer, Indexer, MyMatrix, SingleSourceHandshakingKernel, LayerNorm
 
 
 class IEModel(nn.Module, metaclass=ABCMeta):

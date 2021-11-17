@@ -21,7 +21,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import BertConfig, BertTokenizerFast, BertModel
 sys.path.append("/data/chenzhihao/NLP")
-from nlp.models.layers import GlobalPointer
+from nlp.layers.global_pointer import GlobalPointer
 from nlp.metrics.metric import MetricsCalculator
 from nlp.processors.dataset import MyDataset, DataMaker
 from nlp.losses.loss import global_pointer_crossentropy

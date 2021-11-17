@@ -13,7 +13,7 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import math
-from nlp.models.utils import HandshakingKernel
+from nlp.models.model_util import HandshakingKernel
 
 
 class HandshakingTaggingScheme(object):

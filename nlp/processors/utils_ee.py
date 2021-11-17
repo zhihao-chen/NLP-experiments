@@ -21,7 +21,7 @@ from seqeval.metrics.sequence_labeling import get_entities
 from torch.utils.data import Dataset
 
 from nlp.processors.utils_ner import get_entities as extract_entities
-from nlp.models.utils import Indexer
+from nlp.models.model_util import Indexer
 
 
 def filter_annotations(sample, start_ind, end_ind):

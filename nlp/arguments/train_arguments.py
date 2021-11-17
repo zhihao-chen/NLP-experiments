@@ -263,6 +263,18 @@ class TrainingArguments:
                     "(e.g. ds_config.json) or an already loaded json file as a dict"
         },
     )
+    early_stop: bool = field(
+        default=False,
+        metadata={"help": "Whether use early stop."}
+    )
+    early_stop_epochs: int = field(
+        default=10,
+        metadata={"help": "How many times triggering early stop after met the threshold, worked when early_stop=True."}
+    )
+    bert_frozen: bool = field(
+        default=True,
+        metadata={"help":"Whether freeze bert layers, only when used in train mode."}
+    )
 
     def __post_init__(self):
         if self.logging_dir:

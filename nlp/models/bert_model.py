@@ -20,8 +20,8 @@ import logging
 from io import open
 
 from nlp.tools.file_util import cached_path
-from nlp.models.layers import *
-from nlp.models.utils import _generate_relative_positions_embeddings
+from nlp.layers.position_embeddings import *
+from nlp.models.model_util import _generate_relative_positions_embeddings
 
 
 CONFIG_NAME = 'bert_config.json'

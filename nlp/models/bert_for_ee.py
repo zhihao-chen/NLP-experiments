@@ -14,7 +14,7 @@ import torch.nn as nn
 from transformers import BertModel, BertPreTrainedModel, BertConfig, BertTokenizer
 
 from nlp.models.nezha import NeZhaModel, NeZhaConfig
-from nlp.models.layers import CRF
+from nlp.layers.crf import CRF
 
 
 # 参考苏剑林的方法，https://github.com/bojone/lic2020_baselines/blob/master/ee.py

@@ -120,5 +120,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-datas/
+datas/kg/
+datas/news2/
+datas/ner/
+datas/spn4re/
+datas/tplinker/
 .DS_Store/

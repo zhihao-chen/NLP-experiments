@@ -7,7 +7,7 @@ from abc import ABCMeta, abstractmethod
 import torch
 import networkx as nx
 
-from nlp.models.utils import Indexer
+from nlp.models.model_util import Indexer
 from nlp.processors.utils_ee import (unique_list,
                                      tok_span2char_span,
                                      extract_ent_fr_txt_by_char_sp,

@@ -43,6 +43,10 @@ class DataArguments:
             "than this will be truncated, sequences shorter will be padded."
         },
     )
+    sliding_len: int = field(
+        default=None,
+        metadata={"help":"sliding when seq length exceed max_seq_len"}
+    )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached preprocessed datasets or not."}
     )

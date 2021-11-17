@@ -10,7 +10,7 @@
 ======================================
 """
 from transformers import BertTokenizerFast
-from nlp.models.utils import _generate_relative_positions_embeddings
+from nlp.models.model_util import _generate_relative_positions_embeddings
 
 bert_model_name_or_path = "/data/chenzhihao/chinese-roberta-ext"
 tokenizer = BertTokenizerFast.from_pretrained(bert_model_name_or_path)
