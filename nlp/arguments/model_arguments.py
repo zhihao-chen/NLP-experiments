@@ -71,3 +71,4 @@ class ModelArguments:
         metadata={"help": "Specify what mode will be used for Child-Tuning. eg:'ChildTuning-D', 'ChildTuning-F'"}
     )
     rdrop_alpha: int = field(default=5, metadata={"help": "Rdrop alpha value, only when use rdrop"})
+    rope: bool = field(default=False, metadata={"help": "Whether use RoPositionEmbedding or not"})
