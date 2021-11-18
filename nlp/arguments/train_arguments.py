@@ -273,7 +273,7 @@ class TrainingArguments:
     )
     bert_frozen: bool = field(
         default=True,
-        metadata={"help":"Whether freeze bert layers, only when used in train mode."}
+        metadata={"help": "Whether freeze bert layers, only when used in train mode."}
     )
 
     def __post_init__(self):
