@@ -67,11 +67,7 @@ args.entity_loss_weight = [float(i) for i in args.entity_loss_weight.split(',')]
 args.output_dir = args.output_dir + '{}'.format(args.model_type)
 if not os.path.exists(args.output_dir):
     os.makedirs(args.output_dir)
-if os.path.exists(args.output_dir) and os.listdir(
-        args.output_dir) and args.do_train and not args.overwrite_output_dir:
-    raise ValueError(
-        "Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(
-            args.output_dir))
+
 time_ = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime())
 LOGGER = init_logger(log_file=args.output_dir + f'/{args.model_type}-{args.task_name}-{time_}.log')
 
@@ -377,6 +373,11 @@ def evaluate(model, eval_dataloader, prefix=""):
 
 
 def main():
+    if os.path.exists(args.output_dir) and os.listdir(
+            args.output_dir) and args.do_train and not args.overwrite_output_dir:
+        raise ValueError(
+            "Output directory ({}) already exists and is not empty. Use --overwrite_output_dir to overcome.".format(
+                args.output_dir))
     init_env()
     relation_labels = args.relation_labels
 
