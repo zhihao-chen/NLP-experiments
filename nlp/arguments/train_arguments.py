@@ -68,6 +68,7 @@ class TrainingArguments:
     do_eval: bool = field(default=False, metadata={"help": "Whether to run eval on the dev set."})
     do_predict_no_tag: bool = field(default=False, metadata={"help": "Whether to run predictions on the test set."})
     do_predict_tag: bool = field(default=False, metadata={"help": "Whether to run eval on the test set."})
+    do_debug: bool = field(default=False, metadata={"help": "Whether to debug train or eval"})
 
     prediction_loss_only: bool = field(
         default=False,
@@ -274,6 +275,10 @@ class TrainingArguments:
     bert_frozen: bool = field(
         default=True,
         metadata={"help": "Whether freeze bert layers, only when used in train mode."}
+    )
+    output_eval_results: bool = field(
+        default=False,
+        metadata={"help": "Whether save predict results during evaluating or not"}
     )
 
     def __post_init__(self):

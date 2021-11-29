@@ -34,7 +34,7 @@ class DataArguments:
 
     task_name: Optional[str] = field(
         default=None,
-        metadata={"help": f"The name of the task to train on: {', '.join(task_to_keys.keys())}"},
+        metadata={"help": f"The name of the task to train. eg: {', '.join(task_to_keys.keys())}"},
     )
     max_seq_length: int = field(
         default=128,
