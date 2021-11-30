@@ -10,7 +10,8 @@
 ======================================
 """
 import re
-from typing import List
+import string
+from typing import List, Optional
 
 import stanza
 from transformers import BertTokenizerFast
@@ -26,6 +27,97 @@ def tokenize(text, vocab, do_lower_case=False) -> List[str]:
         else:
             _tokens.append('[UNK]')
     return _tokens
+
+
+class MyTokenizer(BertTokenizerFast):
+    SPE = "│"
+    LETTERS = string.ascii_letters + string.punctuation + "！=·，；。？《》【】"
+
+    def __init__(self, *args, **kwargs):
+        """
+        use：MyTokenizer(vocab_file=vocab_file, do_lower_case=True)
+        :param args:
+        :param kwargs:
+        """
+        super(MyTokenizer, self).__init__(*args, **kwargs)
+        self.letter_dict = {c: i for i, c in enumerate(self.LETTERS)}
+
+    def prepare_text_for_tokenize(self, text: str) -> str:
+        """
+        主要为了预处理文本。中文间的空格不应该直接剔除，而英文的空格保持原样，此外，替换完后，为了便于恢复原有文本（每个token一致），
+        需要保证修改后的文本与原文本长度一致。
+        """
+        if len(text) <= 2:
+            return text
+        new_text = text[0]
+        for i in range(1, len(text) - 1):
+            c = text[i]
+            if not c.strip() and not (text[i - 1] in self.letter_dict or text[i + 1] in self.letter_dict):
+                new_text += self.SPE
+            else:
+                new_text += c
+        new_text += text[-1]
+        new_text = self.pre_tokenize(new_text)
+        return new_text
+
+    def pre_tokenize(self, text: str) -> str:
+        tokens = []
+        for c in text:
+            if self.is_chinese_char(c):
+                tokens.append(" ")
+                tokens.append(c)
+                tokens.append(" ")
+            # 官方tokenizer会将数字按照subwords解析，但解析后会有offset_mapping和原始的char offset对应不上的情况
+            # 例如电话号码
+            elif c.isdigit():
+                tokens.append(" ")
+                tokens.append(c)
+                tokens.append(" ")
+            else:
+                tokens.append(c)
+        return "".join(tokens)
+
+    def tokenize(self, text: str, pair: Optional[str] = None, add_special_tokens: bool = False, **kwargs) -> List[str]:
+        new_text = self.prepare_text_for_tokenize(text)
+        tokens = super(MyTokenizer, self).tokenize(new_text, pair, add_special_tokens, **kwargs)
+        return tokens
+
+    def encode_plus_for_me(self, text: str, *args, **kwargs):
+        new_text = self.prepare_text_for_tokenize(text)
+        features = super(MyTokenizer, self).encode_plus(new_text, *args, **kwargs)
+
+        return features
+
+    def is_chinese_char(self, char: str) -> bool:
+        """Checks whether CP is the codepoint of a CJK character."""
+        cp = ord(char)
+        if (0x4E00 <= cp <= 0x9FFF or
+            0x3400 <= cp <= 0x4DBF or
+            0x20000 <= cp <= 0x2A6DF or
+            0x2A700 <= cp <= 0x2B73F or
+            0x2B740 <= cp <= 0x2B81F or
+            0x2B820 <= cp <= 0x2CEAF or
+            0xF900 <= cp <= 0xFAFF or
+            0x2F800 <= cp <= 0x2FA1F) \
+                and not self.is_invalid_chinese(char):
+            return True
+
+        return False
+
+    @staticmethod
+    def is_invalid_chinese(text: str) -> bool:
+        """
+        判断是不是中文乱码
+        :param text:
+        :return: False if not Chinese
+        :return: False if is Chinese and is valid
+        :return: True if is Chinese is invalid
+        """
+        try:
+            text.encode('gb2312')
+            return False
+        except UnicodeEncodeError:
+            return True
 
 
 class ChineseWordTokenizer:
