@@ -98,21 +98,6 @@ class MyTokenizer(BertTokenizerFast):
         except UnicodeEncodeError:
             return True
 
-    @staticmethod
-    def is_invalid_chinese(text: str) -> bool:
-        """
-        判断是不是中文乱码
-        :param text:
-        :return: False if not Chinese
-        :return: False if is Chinese and is valid
-        :return: True if is Chinese is invalid
-        """
-        try:
-            text.encode('gb2312')
-            return False
-        except UnicodeEncodeError:
-            return True
-
 
 class ChineseWordTokenizer:
     @staticmethod
