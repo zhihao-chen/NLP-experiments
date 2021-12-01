@@ -30,35 +30,10 @@ def tokenize(text, vocab, do_lower_case=False) -> List[str]:
 
 
 class MyTokenizer(BertTokenizerFast):
-    SPE = "│"
-    LETTERS = string.ascii_letters + string.punctuation + "！=·，；。？《》【】"
 
-    def __init__(self, *args, **kwargs):
-        """
-        use：MyTokenizer(vocab_file=vocab_file, do_lower_case=True)
-        :param args:
-        :param kwargs:
-        """
+    def __init__(self, use_org_tokenizer=False, *args, **kwargs):
         super(MyTokenizer, self).__init__(*args, **kwargs)
-        self.letter_dict = {c: i for i, c in enumerate(self.LETTERS)}
-
-    def prepare_text_for_tokenize(self, text: str) -> str:
-        """
-        主要为了预处理文本。中文间的空格不应该直接剔除，而英文的空格保持原样，此外，替换完后，为了便于恢复原有文本（每个token一致），
-        需要保证修改后的文本与原文本长度一致。
-        """
-        if len(text) <= 2:
-            return text
-        new_text = text[0]
-        for i in range(1, len(text) - 1):
-            c = text[i]
-            if not c.strip() and not (text[i - 1] in self.letter_dict or text[i + 1] in self.letter_dict):
-                new_text += self.SPE
-            else:
-                new_text += c
-        new_text += text[-1]
-        new_text = self.pre_tokenize(new_text)
-        return new_text
+        self.use_org_tokenizer = use_org_tokenizer
 
     def pre_tokenize(self, text: str) -> str:
         tokens = []
@@ -74,17 +49,21 @@ class MyTokenizer(BertTokenizerFast):
                 tokens.append(c)
                 tokens.append(" ")
             else:
+                if self.do_lower_case:  # noqa
+                    c = c.lower()
                 tokens.append(c)
         return "".join(tokens)
 
     def tokenize(self, text: str, pair: Optional[str] = None, add_special_tokens: bool = False, **kwargs) -> List[str]:
-        new_text = self.prepare_text_for_tokenize(text)
-        tokens = super(MyTokenizer, self).tokenize(new_text, pair, add_special_tokens, **kwargs)
+        if not self.use_org_tokenizer:
+            text = self.pre_tokenize(text)
+        tokens = super(MyTokenizer, self).tokenize(text, pair, add_special_tokens, **kwargs)
         return tokens
 
     def encode_plus_for_me(self, text: str, *args, **kwargs):
-        new_text = self.prepare_text_for_tokenize(text)
-        features = super(MyTokenizer, self).encode_plus(new_text, *args, **kwargs)
+        if not self.use_org_tokenizer:
+            text = self.pre_tokenize(text)
+        features = super(MyTokenizer, self).encode_plus(text, *args, **kwargs)
 
         return features
 
@@ -103,6 +82,21 @@ class MyTokenizer(BertTokenizerFast):
             return True
 
         return False
+
+    @staticmethod
+    def is_invalid_chinese(text: str) -> bool:
+        """
+        判断是不是中文乱码
+        :param text:
+        :return: False if not Chinese
+        :return: False if is Chinese and is valid
+        :return: True if is Chinese is invalid
+        """
+        try:
+            text.encode('gb2312')
+            return False
+        except UnicodeEncodeError:
+            return True
 
     @staticmethod
     def is_invalid_chinese(text: str) -> bool:
