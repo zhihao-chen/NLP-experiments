@@ -31,9 +31,11 @@ def tokenize(text, vocab, do_lower_case=False) -> List[str]:
 
 class MyTokenizer(BertTokenizerFast):
 
-    def __init__(self, use_org_tokenizer=False, *args, **kwargs):
+    def __init__(self, is_pre_tokenize: bool = False,
+                 use_list_tokenizer: bool = False, *args, **kwargs):
         super(MyTokenizer, self).__init__(*args, **kwargs)
-        self.use_org_tokenizer = use_org_tokenizer
+        self.is_pre_tokenize = is_pre_tokenize
+        self.use_list_tokenizer = use_list_tokenizer
 
     def pre_tokenize(self, text: str) -> str:
         tokens = []
@@ -54,14 +56,28 @@ class MyTokenizer(BertTokenizerFast):
                 tokens.append(c)
         return "".join(tokens)
 
+    def list_tokenize(self, text: str):
+        _tokens = []
+        for c in text:
+            if self.do_lower_case:
+                c = c.lower()
+            if c in self.vocab:
+                _tokens.append(c)
+            else:
+                _tokens.append('[UNK]')
+        return _tokens
+
     def tokenize(self, text: str, pair: Optional[str] = None, add_special_tokens: bool = False, **kwargs) -> List[str]:
-        if not self.use_org_tokenizer:
+        if not self.is_pre_tokenize:
             text = self.pre_tokenize(text)
-        tokens = super(MyTokenizer, self).tokenize(text, pair, add_special_tokens, **kwargs)
+        if self.use_list_tokenizer:
+            tokens = self.list_tokenize(text)
+        else:
+            tokens = super(MyTokenizer, self).tokenize(text, pair, add_special_tokens, **kwargs)
         return tokens
 
     def encode_plus_for_me(self, text: str, *args, **kwargs):
-        if not self.use_org_tokenizer:
+        if not self.is_pre_tokenize:
             text = self.pre_tokenize(text)
         features = super(MyTokenizer, self).encode_plus(text, *args, **kwargs)
 
