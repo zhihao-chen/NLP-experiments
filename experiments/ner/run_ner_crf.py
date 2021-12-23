@@ -192,44 +192,44 @@ def train(train_dataset, model, tokenizer):
                 scheduler.step()  # Update learning rate schedule
                 model.zero_grad()
                 global_step += 1
-                if args.local_rank in [-1, 0] and args.eval_steps > 0 and global_step % args.eval_steps == 0:
-                    # Log metrics
-                    if args.local_rank == -1:
-                        # Only evaluate when single GPU otherwise metrics may not average well
-                        result = evaluate(model, tokenizer)
-                        WRITER.add_scalar("Loss/Eval", result['loss'], global_step=global_step)
-                        if args.greater_is_better:
-                            score = result[args.metric_for_best_model]
-                            if score > best_score:
-                                best_score = score
-                                best_epoch = epoch
-                                model_to_save = (
-                                    model.module if hasattr(model, "module") else model
-                                )  # Take care of distributed/parallel training
-                                output_dir = os.path.join(args.output_dir, "best_model")
-                                if not os.path.exists(output_dir):
-                                    os.makedirs(output_dir)
-                                LOGGER.info(f"Save best model to {output_dir}")
-                                model_to_save.save_pretrained(output_dir)
-                                tokenizer.save_vocabulary(output_dir)
-                if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
-                    # Save model checkpoint
-                    output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)
-                    model_to_save = (
-                        model.module if hasattr(model, "module") else model
-                    )  # Take care of distributed/parallel training
-                    model_to_save.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, "training_args.bin"))
-                    LOGGER.info("Saving model checkpoint to %s", output_dir)
-                    tokenizer.save_vocabulary(output_dir)
-                    torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
-                    torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
-                    LOGGER.info("Saving optimizer and scheduler states to %s", output_dir)
+            if args.local_rank in [-1, 0] and args.eval_steps > 0 and global_step % args.eval_steps == 0:
+                # Log metrics
+                if args.local_rank == -1:
+                    # Only evaluate when single GPU otherwise metrics may not average well
+                    result = evaluate(model, tokenizer)
+                    WRITER.add_scalar("Loss/Eval", result['loss'], global_step=global_step)
+                    if args.greater_is_better:
+                        score = result[args.metric_for_best_model]
+                        if score > best_score:
+                            best_score = score
+                            best_epoch = epoch
+                            model_to_save = (
+                                model.module if hasattr(model, "module") else model
+                            )  # Take care of distributed/parallel training
+                            output_dir = os.path.join(args.output_dir, "best_model")
+                            if not os.path.exists(output_dir):
+                                os.makedirs(output_dir)
+                            LOGGER.info(f"Save best model to {output_dir}")
+                            model_to_save.save_pretrained(output_dir)
+                            tokenizer.save_vocabulary(output_dir)
+            if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
+                # Save model checkpoint
+                output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+                model_to_save = (
+                    model.module if hasattr(model, "module") else model
+                )  # Take care of distributed/parallel training
+                model_to_save.save_pretrained(output_dir)
+                torch.save(args, os.path.join(output_dir, "training_args.bin"))
+                LOGGER.info("Saving model checkpoint to %s", output_dir)
+                tokenizer.save_vocabulary(output_dir)
+                torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
+                torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
+                LOGGER.info("Saving optimizer and scheduler states to %s", output_dir)
 
-                    if args.save_total_limit:
-                        rotate_checkpoints(save_total_limit=args.save_total_limit, output_dir=args.output_dir)
+                if args.save_total_limit:
+                    rotate_checkpoints(save_total_limit=args.save_total_limit, output_dir=args.output_dir)
         LOGGER.info(f"total loss: {tr_loss/global_step}")
         LOGGER.info("\n")
     return best_score, best_epoch
