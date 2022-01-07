@@ -67,7 +67,7 @@ def init_model(num_labels, model_name_or_path=None):
                                                 do_lower_case=args.do_lower_case,
                                                 cache_dir=args.cache_dir if args.cache_dir else None, )
     model = model_class.from_pretrained(model_name_or_path, from_tf=bool(".ckpt" in model_name_or_path),
-                                        config=config, train_args=args, model_type='bert',
+                                        config=config, train_args=args,
                                         cache_dir=args.cache_dir if args.cache_dir else None)
     return config, tokenizer, model
 
