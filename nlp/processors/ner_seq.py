@@ -307,13 +307,13 @@ class NerProcessor(DataProcessor):
                         continue
                     labels.add(line)
         else:
-            labels = {"X", "B-address", "B-book", "B-company", 'B-game', 'B-government', 'B-movie', 'B-name',
+            labels = ["X", "B-address", "B-book", "B-company", 'B-game', 'B-government', 'B-movie', 'B-name',
                       'B-organization', 'B-scene', 'B-cont', 'B-edu', 'B-loc', 'B-pro', 'B-race', 'B-title',
                       "I-address", 'I-cont', 'I-edu', 'I-loc', 'I-pro', 'I-race', 'I-title', "I-book", "I-company",
                       'I-game', 'I-government', 'I-movie', 'I-name', 'I-organization', 'I-scene',
                       "S-address", "S-book", "S-company", 'S-game', 'S-government', 'S-movie', 'S-name',
-                      'S-organization', 'S-race', "S-edu", "S-cont", "S-loc", "S-pro", "S-title", "S-edu", 'S-scene',
-                      'O', "[START]", "[END]"}
+                      'S-organization', 'S-race', "S-cont", "S-loc", "S-pro", "S-title", "S-edu", 'S-scene',
+                      'O', "[START]", "[END]"]
         return labels
 
     @staticmethod

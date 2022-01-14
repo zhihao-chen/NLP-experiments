@@ -201,10 +201,11 @@ def train(train_dataset, model, tokenizer):
                     # Log metrics
                     if args.local_rank == -1:
                         # Only evaluate when single GPU otherwise metrics may not average well
-                        result = evaluate(model, tokenizer)
+                        result, entity_info = evaluate(model, tokenizer)
                         WRITER.add_scalar("Loss/Eval", result['loss'], global_step=global_step)
                         if args.greater_is_better:
-                            score = result[args.metric_for_best_model]
+                            # score = result[args.metric_for_best_model]
+                            score = entity_info['company']['f1']
                             if score > best_score:
                                 best_score = score
                                 best_epoch = epoch
@@ -302,7 +303,7 @@ def evaluate(model, tokenizer, data_type="dev", prefix=""):
         LOGGER.info("******* %s results ********" % key)
         info = "-".join([f' {key}: {value:.4f} ' for key, value in entity_info[key].items()])
         LOGGER.info(info)
-    return results
+    return results, entity_info
 
 
 def predict(model, tokenizer, prefix=""):
@@ -451,6 +452,7 @@ def main():
         LOGGER.info(f"best_epoch = %s, best_{args.metric_for_best_model} = %s", best_epoch, best_score)
     # Evaluation
     results = {}
+    entities_info = {}
     if args.do_eval and args.local_rank in [-1, 0]:
         best_model_path = os.path.join(args.output_dir, "best_model")
         checkpoints = [best_model_path]
@@ -465,17 +467,25 @@ def main():
             config, tokenizer, model = init_model(num_labels, checkpoint)
             model.to(args.device)
             if args.do_predict_tag:
-                result = evaluate(model, tokenizer, data_type="test", prefix=prefix)
+                result, entity_info = evaluate(model, tokenizer, data_type="test", prefix=prefix)
             else:
-                result = evaluate(model, tokenizer, prefix=prefix)
+                result, entity_info = evaluate(model, tokenizer, prefix=prefix)
             if global_step:
                 result = {"{}_{}".format(global_step, k): v for k, v in result.items()}
             results.update(result)
+            entities_info.update(entity_info)
 
         output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
         with open(output_eval_file, "w") as fw:
             for key in sorted(results.keys()):
                 fw.write("{} = {}\n".format(key, str(results[key])))
+            fw.write('\n')
+            for key in sorted(entities_info.keys()):
+                infos = []
+                for k, v in entities_info[key].items():
+                    infos.append(f"{k}: {v}")
+                info = f"{key}\t{' '.join(infos)}"
+                fw.write(info + '\n')
 
     if args.do_predict_no_tag and args.local_rank in [-1, 0]:
         best_model_path = os.path.join(args.output_dir, "best_model")

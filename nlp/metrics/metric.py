@@ -116,12 +116,13 @@ class SeqEntityScore(object):
             found = found_counter.get(type_, 0)
             right = right_counter.get(type_, 0)
             recall, precision, f1 = self.compute(origin, found, right)
-            class_info[type_] = {"acc": round(precision, 4), 'recall': round(recall, 4), 'f1': round(f1, 4)}
+            class_info[type_] = {"precision": round(precision, 4), 'recall': round(recall, 4), 'f1': round(f1, 4),
+                                 "gold_num": origin, "pred_num": found, "right_num": right}
         origin = len(self.origins)
         found = len(self.founds)
         right = len(self.rights)
         recall, precision, f1 = self.compute(origin, found, right)
-        return {'acc': precision, 'recall': recall, 'f1': f1}, class_info
+        return {'precision': precision, 'recall': recall, 'f1': f1}, class_info
 
     def update(self, label_paths, pred_paths):
         """
@@ -176,12 +177,13 @@ class SpanEntityScore(object):
             found = found_counter.get(type_, 0)
             right = right_counter.get(type_, 0)
             recall, precision, f1 = self.compute(origin, found, right)
-            class_info[type_] = {"acc": round(precision, 4), 'recall': round(recall, 4), 'f1': round(f1, 4)}
+            class_info[type_] = {"precision": round(precision, 4), 'recall': round(recall, 4), 'f1': round(f1, 4),
+                                 "gold_num": origin, "pred_num": found, "right_num": right}
         origin = len(self.origins)
         found = len(self.founds)
         right = len(self.rights)
         recall, precision, f1 = self.compute(origin, found, right)
-        return {'acc': precision, 'recall': recall, 'f1': f1}, class_info
+        return {'precision': precision, 'recall': recall, 'f1': f1}, class_info
 
     def update(self, true_subject, pred_subject):
         self.origins.extend(true_subject)

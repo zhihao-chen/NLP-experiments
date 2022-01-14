@@ -187,22 +187,25 @@ class PreProcessor:
                             uniq_key = set()
                             for rel in labels:
                                 relation_type = rel["relation"]
+                                entities = []
+                                for ent in rel["entities"]:
+                                    # print(ent)
+                                    char_span = ent.get("offset") if len(ent.get("offset")) == 2 else (0, 0)
+                                    a = EntityItem(
+                                            text=ent["text"],
+                                            char_span=char_span,  # 如果实体为空，offset需要兼容
+                                            token_span=self.compute_token_offset_of_entity(
+                                                text_offset_mapping=offset_mapping,
+                                                entity_offset=char_span
+                                            )
+                                        )
+                                    entities.append(a)
                                 tup = TupleItem(
                                     relation_id=self.rel2id.get(
                                         relation_type,
                                         self.rel2id.get(UNKNOWN_RELATION)
                                     ),
-                                    entities=[
-                                        EntityItem(
-                                            text=ent["text"],
-                                            char_span=ent.get("offset", (0, 0)),  # 如果实体为空，offset需要兼容
-                                            token_span=self.compute_token_offset_of_entity(
-                                                text_offset_mapping=offset_mapping,
-                                                entity_offset=ent.get("offset")
-                                            )
-                                        )
-                                        for ent in rel["entities"]
-                                    ]
+                                    entities=entities
                                 )
                                 # 去重
                                 key_arr = [cnt, tup.relation_id]
