@@ -23,6 +23,7 @@ from transformers import (get_scheduler, BertTokenizer, set_seed, BertConfig, Al
                           RoFormerTokenizer, RoFormerConfig, HfArgumentParser)
 
 from nlp.callback.optimizers.adamw import AdamW
+from nlp.callback.adversarial import FGM
 from nlp.models.nezha import NeZhaConfig
 from nlp.models.bert_for_ner import BertCrfForNer, AlbertCrfForNer
 from nlp.processors.utils_ner import get_entities
@@ -146,8 +147,8 @@ def train(train_dataset, model, tokenizer):
         LOGGER.info("  Continuing training from epoch %d", epochs_trained)
         LOGGER.info("  Continuing training from global step %d", global_step)
         LOGGER.info("  Will skip the first %d steps in the first epoch", steps_trained_in_current_epoch)
-
-    model.train()
+    if args.do_adv:
+        fgm = FGM(model, emb_name=args.adv_name, epsilon=args.adv_epsilon)
     model.zero_grad()
     best_score = 0.0
     best_epoch = 0
@@ -159,6 +160,8 @@ def train(train_dataset, model, tokenizer):
             if steps_trained_in_current_epoch > 0:
                 steps_trained_in_current_epoch -= 1
                 continue
+            model.train()
+
             batch = tuple(t.to(args.device) for t in batch)
             inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
             if args.model_type != "distilbert":
@@ -180,6 +183,17 @@ def train(train_dataset, model, tokenizer):
                 SCALER.scale(loss).backward()
             else:
                 loss.backward()
+            if args.do_adv:
+                fgm.attack()  # noqa
+                loss_adv = model(**inputs)["loss"]
+                if args.n_gpu > 1:
+                    loss_adv = loss_adv.mean()
+                # loss_adv.backward()
+                if args.fp16 and args.fp16_backend == 'amp':
+                    SCALER.scale(loss_adv).backward()
+                else:
+                    loss_adv.backward()
+                fgm.restore()
             if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                 WRITER.add_scalar("Loss/Train", loss.item(), global_step=global_step)
             tr_loss += loss.item()

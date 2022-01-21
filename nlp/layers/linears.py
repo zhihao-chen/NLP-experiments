@@ -39,6 +39,7 @@ class EntityLinears(nn.Module):
         self.tail = Linears(input_dim=input_dim, output_dim=output_dim, bias=bias)
 
     def forward(self, hidden_states: torch.Tensor, encoder_hidden_states: torch.Tensor):
+        # [bsz, num_triples, seq_len, output_dim]
         return self.head(hidden_states, encoder_hidden_states), self.tail(hidden_states, encoder_hidden_states)
 
 

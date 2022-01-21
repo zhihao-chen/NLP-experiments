@@ -15,6 +15,7 @@ python /data/chenzhihao/NLP/experiments/ner/run_ner_crf.py \
   --do_train \
   --do_eval \
   --do_predict_no_tag \
+  --do_adv \
   --data_dir=$DATA_DIR/${TASK_NAME}/ \
   --max_seq_length=256 \
   --per_gpu_train_batch_size=32 \

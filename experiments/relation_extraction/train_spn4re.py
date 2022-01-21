@@ -315,7 +315,7 @@ def train(model, train_dataloader, eval_dataloader, tokenizer):
                                 if not os.path.exists(output_dir):
                                     os.makedirs(output_dir)
                                 LOGGER.info(f"Save best model to {output_dir}")
-                                torch.save(model_to_save, output_dir+'/pytorch.bin')
+                                torch.save(model_to_save.state_dict(), output_dir+'/pytorch.bin')
                                 tokenizer.save_vocabulary(output_dir)
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
@@ -325,7 +325,7 @@ def train(model, train_dataloader, eval_dataloader, tokenizer):
                     model_to_save = (
                         model.module if hasattr(model, "module") else model
                     )  # Take care of distributed/parallel training
-                    torch.save(model_to_save, output_dir+'/pytorch.bin')
+                    torch.save(model_to_save.state_dict(), output_dir+'/pytorch.bin')
                     torch.save(args, os.path.join(output_dir, "training_args.bin"))
                     LOGGER.info("Saving model checkpoint to %s", output_dir)
                     tokenizer.save_vocabulary(output_dir)
@@ -401,31 +401,31 @@ def main():
     if args.do_train:
         best_score, best_epoch = train(model, train_dataloader, eval_dataloader, tokenizer)
         LOGGER.info(f"best_epoch = %s, best_{args.metric_for_best_model} = %s", best_epoch, best_score)
-        # Evaluation
-        results = {}
-        if args.do_eval and args.local_rank in [-1, 0]:
-            best_model_path = os.path.join(args.output_dir, "best_model")
-            checkpoints = [best_model_path]
-            if args.eval_all_checkpoints:
-                checkpoints = list(
-                    os.path.dirname(c) for c in
-                    sorted(glob.glob(args.output_dir + "/**/pytorch_model.bin", recursive=True))
-                )
-            LOGGER.info("Evaluate the following checkpoints: %s", checkpoints)
-            for checkpoint in checkpoints:
-                global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-                prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
-                eval_model = load_model(num_labels=len(relation_labels), model_name_or_path=checkpoint)
-                eval_model.to(args.device)
-                result = evaluate(eval_model, eval_dataloader, prefix)
-                if global_step:
-                    result = {"{}_{}".format(global_step, k): v for k, v in result.items()}
-                results.update(result)
+    # Evaluation
+    results = {}
+    if args.do_eval and args.local_rank in [-1, 0]:
+        best_model_path = os.path.join(args.output_dir, "best_model")
+        checkpoints = [best_model_path]
+        if args.eval_all_checkpoints:
+            checkpoints = list(
+                os.path.dirname(c) for c in
+                sorted(glob.glob(args.output_dir + "/**/pytorch_model.bin", recursive=True))
+            )
+        LOGGER.info("Evaluate the following checkpoints: %s", checkpoints)
+        for checkpoint in checkpoints:
+            global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
+            prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
+            eval_model = load_model(num_labels=len(relation_labels), model_name_or_path=checkpoint)
+            eval_model.to(args.device)
+            result = evaluate(eval_model, eval_dataloader, prefix)
+            if global_step:
+                result = {"{}_{}".format(global_step, k): v for k, v in result.items()}
+            results.update(result)
 
-            output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
-            with open(output_eval_file, "w") as fw:
-                for key in sorted(results.keys()):
-                    fw.write("{} = {}\n".format(key, str(results[key])))
+        output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
+        with open(output_eval_file, "w") as fw:
+            for key in sorted(results.keys()):
+                fw.write("{} = {}\n".format(key, str(results[key])))
 
 
 if __name__ == "__main__":

@@ -312,7 +312,7 @@ class SetDecoder(nn.Module):
 
         class_logits = self.decoder2class(hidden_states)
 
-        ent_logits = ()
+        ent_logits = ()  # ((head_logits, tail_logits))*num_entities_in_tuple
         for layer_module in self.entity_linears:
             ent_logits = ent_logits + (layer_module(hidden_states, encoder_hidden_states),)
 
