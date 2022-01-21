@@ -276,12 +276,12 @@ class PreProcessor:
         for idx, (st, ed) in enumerate(text_offset_mapping):
             if entity_st == st:
                 tok_st = idx
-            if entity_ed == ed-1:
+            if entity_ed == ed:
                 tok_ed = idx
+            if 0 <= tok_st <= tok_ed:
+                return tok_st, tok_ed
 
-        if 0 <= tok_st < tok_ed:
-            return tok_st, tok_ed
-        else:
+        if not (0 <= tok_st <= tok_ed):
             raise ParseEntityOffsetMappingError("Labeled entity not match tokenizer!")
 
     def complete_sample(self, sample: InputSample):
