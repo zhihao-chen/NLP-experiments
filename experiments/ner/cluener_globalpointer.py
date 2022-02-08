@@ -21,7 +21,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from transformers import BertConfig, BertTokenizerFast, BertModel
 sys.path.append("/data/chenzhihao/NLP")
-from nlp.layers.global_pointer import GlobalPointer
+from nlp.layers.global_pointer import GlobalPointer, EfficientGlobalPointer
 from nlp.metrics.metric import MetricsCalculator
 from nlp.processors.dataset import MyDataset, DataMaker
 from nlp.losses.loss import global_pointer_crossentropy
@@ -41,17 +41,21 @@ gradient_accumulation_steps = 1
 logging_steps = 500
 num_worker = 2
 
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
 label_list = ["address", "book", "company", 'game', 'government', 'movie', 'name', 'organization',
               'position', 'scene', 'O']
 label2id = {label: i for i, label in enumerate(label_list)}
 id2label = {i: label for i, label in enumerate(label_list)}
 
-device = torch.device('cuda:1')
+device = torch.device('cuda:0')
 
 tokenizer = BertTokenizerFast.from_pretrained(bert_model_name_or_path, do_lower_case=False, add_special_tokens=True)
 bert_config = BertConfig.from_pretrained(bert_model_name_or_path)
 encoder = BertModel.from_pretrained(bert_model_name_or_path)
-mymodel = GlobalPointer(encoder, len(label_list), 64).to(device) #9个实体类型
+# mymodel = GlobalPointer(encoder, len(label_list), 64)  # 9个实体类型
+mymodel = EfficientGlobalPointer(encoder, len(label_list))
 mymodel.to(device)
 
 optimizer = AdamW(params=mymodel.parameters(), lr=lr_rate)
@@ -203,7 +207,7 @@ def train(model, train_dataloader, eval_dataloader):
                 model.module if hasattr(model, "module") else model
             )  # Take care of distributed/parallel training
             # model_to_save.save_pretrained(output_dir)
-            torch.save(model.state_dict(), output_dir+'/pytorch.bin')
+            torch.save(model_to_save.state_dict(), output_dir+'/pytorch.bin')
             tokenizer.save_vocabulary(output_dir)
             print(f"save model to {output_dir}")
     return best_epoch, best_f1
