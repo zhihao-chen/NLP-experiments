@@ -41,7 +41,7 @@ python /data/chenzhihao/NLP/experiments/relation_extraction/train_spn4re.py \
   --greater_is_better \
   --sliding_len=20 \
   --relation_labels="BUSEXP,ORGFIN,PERUP,STRCOO" \
-  --num_generated_tuples=20 \
+  --num_generated_tuples=10 \
   --num_entities_in_tuple=8 \
   --allow_null_entities_in_tuple="0,0,1,1,1,1,1,1" \
-  --entity_loss_weight="3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0"
+  --entity_loss_weight="2,2,2,2,2,2,2,2"
