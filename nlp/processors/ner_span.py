@@ -328,6 +328,7 @@ class NerProcessor(DataProcessor):
             labels = ["X", "address", "book", "company", 'game', 'government', 'movie', 'name',
                       'organization', 'scene', 'cont', 'edu', 'loc', 'pro', 'race', 'title',
                       'O', "[START]", "[END]"]
+        return labels
 
     @staticmethod
     def _create_examples(lines, set_type):
