@@ -9,9 +9,12 @@
     Change Activity: 
 ======================================
 """
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as func
+from torch.nn.parameter import Parameter
 
 
 class Linears(nn.Module):
@@ -87,3 +90,113 @@ class PoolerEndLogits(nn.Module):
         x = self.dense_1(x)
         return x
 
+
+class MultiNonLinearClassifier(nn.Module):
+    def __init__(self, hidden_size, num_label, dropout_rate, act_func="gelu", intermediate_hidden_size=None):
+        super(MultiNonLinearClassifier, self).__init__()
+        self.num_label = num_label
+        self.intermediate_hidden_size = hidden_size if intermediate_hidden_size is None else intermediate_hidden_size
+        self.classifier1 = nn.Linear(hidden_size, self.intermediate_hidden_size)
+        self.classifier2 = nn.Linear(self.intermediate_hidden_size, self.num_label)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.act_func = act_func
+
+    def forward(self, input_features):
+        features_output1 = self.classifier1(input_features)
+        if self.act_func == "gelu":
+            features_output1 = func.gelu(features_output1)
+        elif self.act_func == "relu":
+            features_output1 = func.relu(features_output1)
+        elif self.act_func == "tanh":
+            features_output1 = func.tanh(features_output1)
+        else:
+            raise ValueError
+        features_output1 = self.dropout(features_output1)
+        features_output2 = self.classifier2(features_output1)
+        return features_output2
+
+
+class SingleLinearClassifier(nn.Module):
+    def __init__(self, hidden_size, num_label):
+        super(SingleLinearClassifier, self).__init__()
+        self.num_label = num_label
+        self.classifier = nn.Linear(hidden_size, num_label)
+
+    def forward(self, input_features):
+        features_output = self.classifier(input_features)
+        return features_output
+
+
+class BERTTaggerClassifier(nn.Module):
+    def __init__(self, hidden_size, num_label, dropout_rate, act_func="gelu", intermediate_hidden_size=None):
+        super(BERTTaggerClassifier, self).__init__()
+        self.num_label = num_label
+        self.intermediate_hidden_size = hidden_size if intermediate_hidden_size is None else intermediate_hidden_size
+        self.classifier1 = nn.Linear(hidden_size, self.intermediate_hidden_size)
+        self.classifier2 = nn.Linear(self.intermediate_hidden_size, self.num_label)
+        self.dropout = nn.Dropout(dropout_rate)
+        self.act_func = act_func
+
+    def forward(self, input_features):
+        features_output1 = self.classifier1(input_features)
+        if self.act_func == "gelu":
+            features_output1 = func.gelu(features_output1)
+        elif self.act_func == "relu":
+            features_output1 = func.relu(features_output1)
+        elif self.act_func == "tanh":
+            features_output1 = func.tanh(features_output1)
+        else:
+            raise ValueError
+        features_output1 = self.dropout(features_output1)
+        features_output2 = self.classifier2(features_output1)
+        return features_output2
+
+
+class ClassifierLayer(nn.Module):
+    # https://github.com/Akeepers/LEAR/blob/master/utils/model_utils.py
+    def __init__(self, class_num, out_features, bias=True):
+        super(ClassifierLayer, self).__init__()
+        self.class_num = class_num
+        self.out_features = out_features
+        self.weight = Parameter(torch.Tensor(class_num, out_features))
+        if bias:
+            self.bias = Parameter(torch.Tensor(class_num))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, inputs):
+        x = torch.mul(inputs, self.weight)
+        # (class_num, 1)
+        x = torch.sum(x, -1)  # [-1, class_num]
+        if self.bias is not None:
+            x = x + self.bias
+        return x
+
+    def extra_repr(self):
+        return 'class_num={}, out_features={}, bias={}'.format(
+            self.class_num, self.out_features, self.bias is not None)
+
+
+class MultiNonLinearClassifierForMultiLabel(nn.Module):
+    # https://github.com/Akeepers/LEAR/blob/master/utils/model_utils.py
+    def __init__(self, hidden_size, num_label, dropout_rate):
+        super(MultiNonLinearClassifierForMultiLabel, self).__init__()
+        self.num_label = num_label
+        self.classifier1 = nn.Linear(hidden_size, hidden_size)
+        self.classifier2 = ClassifierLayer(num_label, hidden_size)
+        self.dropout = nn.Dropout(dropout_rate)
+
+    def forward(self, input_features):
+        features_output1 = self.classifier1(input_features)
+        features_output1 = func.gelu(features_output1)
+        features_output1 = self.dropout(features_output1)
+        features_output2 = self.classifier2(features_output1)
+        return features_output2

@@ -48,12 +48,13 @@ import torch
 import numpy as np
 
 
-def calculate_fisher(model, train_dataloader, reserve_p=1.0, max_grad_norm=1.0, loss_func=None):
+def calculate_fisher(model, train_dataloader, device=None, reserve_p=1.0, max_grad_norm=1.0, loss_func=None):
     """
     Calculate Fisher Information for different parameters
     遍历训练数据计算Fisher，得到child Network
     :param model:
     :param train_dataloader:
+    :param device:
     :param reserve_p:
     :param max_grad_norm:
     :param loss_func: 如果模型输出的是logits，则传入loss_func；如果输出的是loss，则不传loss_func。
@@ -72,9 +73,18 @@ def calculate_fisher(model, train_dataloader, reserve_p=1.0, max_grad_norm=1.0, 
     for batch in tqdm(train_dataloader):
         # inputs的参数必须与你定义的模型输入参数一致
         # inputs: {"input_ids":None, "attention_mask": None, "token_type_ids": None, "labels"：None}
-        batch = tuple(t.to(model.device) for t in batch)
-        inputs = {"input_ids": batch[0], "attention_mask": batch[1],
-                  "token_type_ids": batch[2], "labels": batch[3]}
+        inputs = {"input_ids": None, "attention_mask": None,
+                  "token_type_ids": None, "labels": None}
+        if isinstance(batch, dict):
+            for k, v in batch.items():
+                if k in inputs:
+                    inputs[k] = v.to(device)
+        elif isinstance(batch, list):
+            batch = tuple(t.to(device) for t in batch)
+            inputs = {"input_ids": batch[0], "attention_mask": batch[1],
+                      "token_type_ids": batch[2], "labels": batch[3]}
+        else:
+            raise ValueError("check arguments of batch whether is matched with model input arguments or not")
         outputs = model(**inputs)
         if loss_func:
             logits = outputs["logits"] if isinstance(outputs, dict) else outputs

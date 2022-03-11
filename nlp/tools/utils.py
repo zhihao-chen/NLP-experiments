@@ -11,11 +11,19 @@
 """
 import collections
 import os
-import re
+import regex
+import unicodedata
 from glob import glob
 
-import torch
-import tensorflow as tf
+import numpy as np
+
+try:
+    import torch
+except:
+    try:
+        import tensorflow as tf
+    except Exception as e:
+        raise ImportError("no module named torch and tensorflow")
 
 
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):
@@ -74,7 +82,7 @@ def get_assigment_map_from_checkpoint(tvars, init_checkpoint):
     name_to_variable = collections.OrderedDict()
     for var in tvars:
         name = var.name
-        m = re.match("^(.*):\\d+$", name)
+        m = regex.match("^(.*):\\d+$", name)
         if m is not None:
             name = m.group(1)
         name_to_variable[name] = var
@@ -212,8 +220,247 @@ def get_char2tok_span(tok2char_span):
 
 def is_invalid_extr_ent(ent, char_span, text):
     def check_invalid(pat):
-        return (char_span[0] - 1 >= 0 and re.match(pat, text[char_span[0] - 1]) is not None
-                and re.match("^{}+".format(pat), ent) is not None) or \
-               (char_span[1] < len(text) and re.match(pat, text[char_span[1]]) is not None
-                and re.match("{}+$".format(pat), ent) is not None)
+        return (char_span[0] - 1 >= 0 and regex.match(pat, text[char_span[0] - 1]) is not None
+                and regex.match("^{}+".format(pat), ent) is not None) or \
+               (char_span[1] < len(text) and regex.match(pat, text[char_span[1]]) is not None
+                and regex.match("{}+$".format(pat), ent) is not None)
     return check_invalid(r"\d") or check_invalid("[A-Za-z]")
+
+
+def is_chinese_char(char):
+    """Checks whether CP is the codepoint of a CJK character."""
+    cp = ord(char)
+    if ((0x4E00 <= cp <= 0x9FFF) or  #
+            (0x3400 <= cp <= 0x4DBF) or  #
+            (0x20000 <= cp <= 0x2A6DF) or  #
+            (0x2A700 <= cp <= 0x2B73F) or  #
+            (0x2B740 <= cp <= 0x2B81F) or  #
+            (0x2B820 <= cp <= 0x2CEAF) or
+            (0xF900 <= cp <= 0xFAFF) or  #
+            (0x2F800 <= cp <= 0x2FA1F)) and not is_invalid_chinese(char):  #
+        return True
+
+    return False
+
+
+def is_all_alpha(word):
+    pattern = r"[a-zA-Z]"
+    temp = [not regex.search(pattern, w) for w in word]
+    return not any(temp)
+
+
+def is_invalid_chinese(text: str):
+    """
+    判断是不是中文乱码
+    :param text:
+    :return: False if not Chinese
+    :return: False if is Chinese and is valid
+    :return: True if is Chinese is invalid
+    """
+    try:
+        text.encode('gb2312')
+        return False
+    except UnicodeEncodeError:
+        return True
+
+
+def is_not_chinese(sentence):
+    """
+    是否没有中文，只有英文字符、数字和标点符号
+    :param sentence:
+    :return:
+    """
+    pattern = r"[\u4e00-\u9fa5]+"
+    res = regex.search(pattern, sentence)
+    if res:
+        return False
+    else:
+        return True
+
+
+def _is_whitespace(char):
+    """Checks whether `char` is a whitespace character."""
+    # \t, \n, and \r are technically control characters but we treat them
+    # as whitespace since they are generally considered as such.
+    if char == " " or char == "\t" or char == "\n" or char == "\r":
+        return True
+    cat = unicodedata.category(char)
+    if cat == "Zs":
+        return True
+    return False
+
+
+def _is_control(char):
+    """Checks whether `char` is a control character."""
+    # These are technically control characters but we count them as whitespace
+    # characters.
+    if char == "\t" or char == "\n" or char == "\r":
+        return False
+    cat = unicodedata.category(char)
+    if cat.startswith("C"):
+        return True
+    return False
+
+
+def _is_punctuation(char):
+    """Checks whether `char` is a punctuation character."""
+    cp = ord(char)
+    # We treat all non-letter/number ASCII as punctuation.
+    # Characters such as "^", "$", and "`" are not in the Unicode
+    # Punctuation class but we treat them as punctuation anyways, for
+    # consistency.
+    if (33 <= cp <= 47) or (58 <= cp <= 64) or (91 <= cp <= 96) or (123 <= cp <= 126):
+        return True
+    cat = unicodedata.category(char)
+    if cat.startswith("P"):
+        return True
+    return False
+
+
+def is_all_punctuation(word):
+    found = True
+    for w in word:
+        if not _is_punctuation(w):
+            found = False
+            break
+    return found
+
+
+def is_not_effective_char(char):
+    found = True
+    if _is_punctuation(char) or is_chinese_char(char) or is_all_alpha(char) or _is_whitespace(char) or char.isdigit():
+        found = False
+    return found
+
+
+# 是否为乱码文本，通过乱码阈值控制
+def is_garbled_text(text, threshold=0.2):
+    is_garbled = False
+
+    invalid_char_num = 0
+    text_len = len(text)
+    for char in text:
+        try:
+            if not is_valid_char(char):
+                invalid_char_num += 1
+
+        except:  # noqa
+            invalid_char_num += 1
+
+        finally:
+            if invalid_char_num / text_len >= threshold:
+                is_garbled = True
+                break
+
+    return is_garbled
+
+
+def is_number_char(uchar):
+    """判断一个unicode是否是数字"""
+    if u'\u0030' <= uchar <= u'\u0039':
+        return True
+    else:
+        return False
+
+
+def is_alphabet_char(uchar):
+    """判断一个unicode是否是英文字母"""
+    if (u'\u0041' <= uchar <= u'\u005a') or (u'\u0061' <= uchar <= u'\u007a'):
+        return True
+    else:
+        return False
+
+
+# 不含乱码
+def is_valid_char(char):
+    try:
+        import string
+        # 专门添加的解析表格的特殊字符
+        other_char = "⊿◣▽▲【】，。、（）-\n\t " + string.punctuation
+
+        if is_chinese_char(char) \
+                or is_alphabet_char(char) \
+                or is_number_char(char) \
+                or char in other_char:
+
+            return True
+        else:
+            return False
+    except:  # noqa
+        return False
+
+
+def find_head_idx(source, target):
+    """
+    在target字符串中找寻source字符串，返回source字符串在target中的开始索引位置
+    :param source:
+    :param target:
+    :return:
+    """
+    target_len = len(target)
+    for i in range(len(source)):
+        if source[i: i + target_len] == target:
+            return i
+    return -1
+
+
+def split_short_text(sentence, max_seq_len=510):
+    """
+    将长文本切分为短文本
+    :param sentence:
+    :param max_seq_len:
+    :return:
+    """
+    sentences = [line.strip() for line in regex.split(r'[。！？!?]', sentence) if line.strip()]
+
+    lines = []
+    text = ""
+    if len(sentences) > 1:
+        for sent in sentences:
+            if not text:
+                text = sent
+                continue
+            if len(text + '。' + sent) <= max_seq_len:
+                text = text + '。' + sent
+            else:
+                lines.append(text)
+                text = ""
+        if text:
+            lines.append(text)
+    else:
+        for i in range(0, len(sentence), 2):
+            if i + max_seq_len < len(sentence):
+                text = sentence[i: i+max_seq_len]
+                assert len(text) <= max_seq_len
+                lines.append(text)
+            else:
+                break
+    return lines
+
+
+def sequence_padding(inputs, length=None, value=0, seq_dims=1, mode='post'):
+    """Numpy函数，将序列padding到同一长度
+    """
+    if length is None:
+        length = np.max([np.shape(x)[:seq_dims] for x in inputs], axis=0)
+    elif not hasattr(length, '__getitem__'):
+        length = [length]
+
+    slices = [np.s_[:length[i]] for i in range(seq_dims)]
+    slices = tuple(slices) if len(slices) > 1 else slices[0]
+    pad_width = [(0, 0) for _ in np.shape(inputs[0])]
+
+    outputs = []
+    for x in inputs:
+        x = x[slices]
+        for i in range(seq_dims):
+            if mode == 'post':
+                pad_width[i] = (0, length[i] - np.shape(x)[i])
+            elif mode == 'pre':
+                pad_width[i] = (length[i] - np.shape(x)[i], 0)
+            else:
+                raise ValueError('"mode" argument must be "post" or "pre".')
+        x = np.pad(x, pad_width, 'constant', constant_values=value)
+        outputs.append(x)
+
+    return np.array(outputs)

@@ -37,13 +37,55 @@ def multilabel_categorical_crossentropy(y_true, y_pred):
     return torch.mean(loss)
 
 
-def global_pointer_crossentropy(y_pred, y_true):
+def sparse_multilabel_categorical_crossentropy(y_true, y_pred, mask_zero=False):
+    """
+    稀疏版多标签分类的交叉熵
+    说明：
+        1. y_true.shape=[..., num_positive]，
+           y_pred.shape=[..., num_classes]；
+        2. 请保证y_pred的值域是全体实数，换言之一般情况下
+           y_pred不用加激活函数，尤其是不能加sigmoid或者
+           softmax；
+        3. 预测阶段则输出y_pred大于0的类；
+        4. 详情请看：https://kexue.fm/archives/7359 。
+    :param y_true:
+    :param y_pred:
+    :param mask_zero:
+    :return:
+    """
+    zeros = torch.zeros_like(y_pred[..., :1])
+    y_pred = torch.cat([y_pred, zeros], dim=-1)
+
+    if mask_zero:
+        infs = zeros + 1e12
+        y_pred = torch.cat([y_pred, y_pred[..., 1:]], dim=-1)
+
+    y_pos_2 = torch.gather(y_pred, index=y_true, dim=-1)
+    y_pos_1 = torch.cat([y_pos_2, zeros], dim=-1)
+    if mask_zero:
+        y_pred = torch.cat([-infs, y_pred[..., 1:]], dim=-1)
+        y_pos_2 = torch.gather(y_pred, index=y_true, dim=-1)
+    pos_loss = torch.logsumexp(-y_pos_1, dim=-1)
+    all_loss = torch.logsumexp(y_pred, dim=-1)
+    aux_loss = torch.logsumexp(y_pos_2, dim=-1) - all_loss
+    aux_loss = torch.clamp(1 - torch.exp(aux_loss), min=1e-07, max=1)
+    neg_loss = all_loss + torch.log(aux_loss)
+    loss = pos_loss + neg_loss
+    return loss.sum(dim=1).mean()
+
+
+def global_pointer_crossentropy(y_pred, y_true, sparse=False, mask_zero=False):
     """给GlobalPointer设计的交叉熵
     """
-    batch_size, ent_type_size = y_pred.shape[:2]
-    y_true = y_true.reshape(batch_size * ent_type_size, -1)
-    y_pred = y_pred.reshape(batch_size * ent_type_size, -1)
-    loss = multilabel_categorical_crossentropy(y_true, y_pred)
+    shape = y_pred.size()
+    if not sparse:
+        y_true = y_true.reshape(shape[0] * shape[1], -1)
+        y_pred = y_pred.reshape(shape[0] * shape[1], -1)
+        loss = multilabel_categorical_crossentropy(y_true, y_pred)
+    else:
+        y_true = y_true[..., 0] * shape[2] + y_true[..., 1]
+        y_pred = torch.reshape(y_pred, (shape[0], -1, torch.prod(torch.tensor(shape[2:])).item()))
+        loss = sparse_multilabel_categorical_crossentropy(y_true, y_pred, mask_zero)
     return loss
 
 

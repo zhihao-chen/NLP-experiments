@@ -31,7 +31,7 @@ class RunMode(Enum):
 
 class DataType(Enum):
     TRAIN = "train"
-    VAL = "val"
+    EVAL = "dev"
     TEST = "test"
 
 

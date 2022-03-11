@@ -9,6 +9,8 @@
     Change Activity: 
 ======================================
 """
+from typing import List
+
 import torch
 import numpy as np
 from torch.utils.data import Dataset
@@ -26,6 +28,45 @@ class MyDataset(Dataset):
 
     def __len__(self):
         return self.length
+
+
+class NerDataset(MyDataset):
+    def __init__(self, data, num_labels, data_type):
+        super(NerDataset, self).__init__(data)
+        self.num_labels = num_labels
+        self.data_type = data_type
+
+    def collate_fn(self, batch_data: List):
+        batch_size = len(batch_data)
+        sent_lens = list(x.token_len for x in batch_data)
+        max_sent_len = max(sent_lens)
+
+        input_ids = torch.zeros((batch_size, max_sent_len), requires_grad=False).long()
+        attention_mask = torch.zeros((batch_size, max_sent_len), requires_grad=False).long()
+        token_type_ids = torch.zeros((batch_size, max_sent_len), requires_grad=False).long()
+        if self.data_type != 'test':
+            label_ids = torch.zeros((batch_size, self.num_labels, max_sent_len, max_sent_len),
+                                    requires_grad=False).long()
+        else:
+            label_ids = None
+
+        sample_list = []
+        for idx, (seq_len, sample) in enumerate(zip(sent_lens, batch_data)):
+            input_ids[idx, :seq_len] = torch.LongTensor(sample.input_ids)
+            attention_mask[idx, :seq_len] = torch.LongTensor(sample.attention_mask)
+            token_type_ids[idx, :seq_len] = torch.LongTensor(sample.token_type_ids)
+            if sample.entity_label_ids is not None and self.data_type != 'test':
+                label_ids[idx, :, :seq_len, :seq_len] = torch.LongTensor(sample.entity_label_ids)
+            sample_list.append(sample)
+
+        results = {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'token_type_ids': token_type_ids,
+            'labels': label_ids,
+            'sample_list': sample_list
+        }
+        return results
 
 
 class DataMaker(object):

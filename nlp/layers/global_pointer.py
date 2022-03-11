@@ -21,18 +21,20 @@ class GlobalPointer(nn.Module):
     将序列的每个(start, end)作为整体来进行判断
     https://kexue.fm/archives/8373
     """
-    def __init__(self, encoder, ent_type_size, inner_dim, rope=True):
+    def __init__(self, ent_type_size, head_size, encoder=None, hidden_size=768, rope=True, tril_mask=True):
         # encodr: RoBerta-Large as encoder
         # inner_dim: 64
         # ent_type_size: ent_cls_num
         super().__init__()
-        self.encoder = encoder
+        if encoder:
+            self.encoder = encoder
         self.ent_type_size = ent_type_size
-        self.inner_dim = inner_dim
-        self.hidden_size = encoder.config.hidden_size
+        self.inner_dim = head_size
+        self.hidden_size = hidden_size
         self.dense = nn.Linear(self.hidden_size, self.ent_type_size * self.inner_dim * 2)
 
         self.rope = rope
+        self.tril_mask = tril_mask
         self.device = torch.device('cpu')
 
     def sinusoidal_position_embedding(self, batch_size, seq_len, output_dim):
@@ -44,15 +46,22 @@ class GlobalPointer(nn.Module):
         embeddings = torch.stack([torch.sin(embeddings), torch.cos(embeddings)], dim=-1)
         embeddings = embeddings.repeat((batch_size, *([1] * len(embeddings.shape))))
         embeddings = torch.reshape(embeddings, (batch_size, seq_len, output_dim))
-        embeddings = embeddings.to(self.device)
+        # embeddings = embeddings.to(self.device)
         return embeddings
 
-    def forward(self, input_ids, attention_mask, token_type_ids):
-        self.device = input_ids.device
-
-        context_outputs = self.encoder(input_ids, attention_mask, token_type_ids)
-        # last_hidden_state:(batch_size, seq_len, hidden_size)
-        last_hidden_state = context_outputs[0]
+    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, last_hidden_state=None):
+        if input_ids is not None:
+            self.device = input_ids.device
+        elif last_hidden_state is not None:
+            self.device = last_hidden_state.device
+        else:
+            raise ValueError("The argument of [input_ids] or [inputs] is empty")
+        if input_ids is not None:
+            context_outputs = self.encoder(input_ids, attention_mask, token_type_ids)
+            # last_hidden_state:(batch_size, seq_len, hidden_size)
+            last_hidden_state = context_outputs.last_hidden_state
+        elif last_hidden_state is not None:
+            last_hidden_state = last_hidden_state
 
         batch_size = last_hidden_state.size()[0]
         seq_len = last_hidden_state.size()[1]
@@ -66,7 +75,7 @@ class GlobalPointer(nn.Module):
         qw, kw = outputs[..., :self.inner_dim], outputs[..., self.inner_dim:]
         if self.rope:
             # pos_emb:(batch_size, seq_len, inner_dim)
-            pos_emb = self.sinusoidal_position_embedding(batch_size, seq_len, self.inner_dim)
+            pos_emb = self.sinusoidal_position_embedding(batch_size, seq_len, self.inner_dim).to(self.device)
             # cos_pos,sin_pos: (batch_size, seq_len, 1, inner_dim)
             cos_pos = pos_emb[..., None, 1::2].repeat_interleave(2, dim=-1)
             sin_pos = pos_emb[..., None, ::2].repeat_interleave(2, dim=-1)
@@ -80,18 +89,20 @@ class GlobalPointer(nn.Module):
         logits = torch.einsum('bmhd,bnhd->bhmn', qw, kw)
 
         # padding mask
-        pad_mask = attention_mask.unsqueeze(1).unsqueeze(1).expand(batch_size, self.ent_type_size, seq_len, seq_len)
-        logits = logits * pad_mask - (1 - pad_mask) * 1e12
+        if attention_mask is not None:
+            pad_mask = attention_mask.unsqueeze(1).unsqueeze(1).expand(batch_size, self.ent_type_size, seq_len, seq_len)
+            logits = logits * pad_mask - (1 - pad_mask) * 1e12
 
         # 排除下三角
-        mask = torch.tril(torch.ones_like(logits), -1)
-        logits = logits - mask * 1e12
+        if self.tril_mask:
+            mask = torch.tril(torch.ones_like(logits), -1)
+            logits = logits - mask * 1e12
 
         return logits / self.inner_dim ** 0.5
 
 
 class EfficientGlobalPointer(GlobalPointer):
-    def __init__(self, encoder, ent_type_size, head_size=64, rope=True, tril_mask=True):
+    def __init__(self, ent_type_size, encoder=None, head_size=64, hidden_size=768, rope=True, tril_mask=True):
         """
         改进后的global-pointer，https://kexue.fm/archives/8877
         :param encoder: 预训练的bert模型
@@ -100,19 +111,26 @@ class EfficientGlobalPointer(GlobalPointer):
         :param rope:
         :param tril_mask: 是否排除下三角
         """
-        super(EfficientGlobalPointer, self).__init__(encoder, ent_type_size, head_size, rope)
+        super(EfficientGlobalPointer, self).__init__(ent_type_size, head_size, encoder, hidden_size, rope)
         self.head_size = head_size
         self.tril_mask = tril_mask
 
         self.dense_1 = nn.Linear(self.hidden_size, self.head_size*2, bias=True)
         self.dense_2 = nn.Linear(self.head_size*2, self.ent_type_size*2, bias=True)
 
-    def forward(self, input_ids, attention_mask, token_type_ids):
-        self.device = input_ids.device
-
-        context_outputs = self.encoder(input_ids, attention_mask, token_type_ids)
-        # last_hidden_state:[batch_size, seq_len, hidden_size]
-        last_hidden_state = context_outputs.last_hidden_state
+    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, last_hidden_state=None):
+        if input_ids is not None:
+            self.device = input_ids.device
+        elif last_hidden_state is not None:
+            self.device = last_hidden_state.device
+        else:
+            raise ValueError("The argument of [input_ids] or [inputs] is empty")
+        if input_ids is not None:
+            context_outputs = self.encoder(input_ids, attention_mask, token_type_ids)
+            # last_hidden_state:(batch_size, seq_len, hidden_size)
+            last_hidden_state = context_outputs.last_hidden_state
+        elif last_hidden_state is not None:
+            last_hidden_state = last_hidden_state
 
         batch_size = last_hidden_state.size()[0]
         seq_len = last_hidden_state.size()[1]
@@ -138,8 +156,9 @@ class EfficientGlobalPointer(GlobalPointer):
         logits = logits[:, None] + bias[:, ::2, None] + bias[:, 1::2, :, None]
 
         # padding mask
-        pad_mask = attention_mask.unsqueeze(1).unsqueeze(1).expand(batch_size, self.ent_type_size, seq_len, seq_len)
-        logits = logits * pad_mask - (1 - pad_mask) * 1e12
+        if attention_mask is not None:
+            pad_mask = attention_mask.unsqueeze(1).unsqueeze(1).expand(batch_size, self.ent_type_size, seq_len, seq_len)
+            logits = logits * pad_mask - (1 - pad_mask) * 1e12
 
         # 排除下三角
         if self.tril_mask:

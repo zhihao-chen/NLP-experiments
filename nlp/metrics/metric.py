@@ -18,15 +18,70 @@ from _collections import defaultdict
 import numpy as np
 from sklearn.metrics import auc
 import torch
-from pattern.text.en import lexeme, lemma
+# from pattern.text.en import lexeme, lemma
 
 from nlp.processors.utils_ner import get_entities
 from nlp.processors.utils_ee import join_segs
 
 
 class MetricsCalculator(object):
-    def __init__(self):
+    def __init__(self, id2label=None):
         super().__init__()
+        self.id2label = id2label
+        self.origins = []
+        self.founds = []
+        self.rights = []
+        self.reset()
+
+    def set_id2labels(self, id2label):
+        self.id2label = id2label
+
+    def reset(self):
+        self.origins = []
+        self.founds = []
+        self.rights = []
+
+    @staticmethod
+    def compute(origin, found, right):
+        recall = 0 if origin == 0 else (right / origin)
+        precision = 0 if found == 0 else (right / found)
+        f1 = 0. if recall + precision == 0 else (2 * precision * recall) / (precision + recall)
+        return recall, precision, f1
+
+    def result(self):
+        class_info = {}
+        origin_counter = Counter([self.id2label[x[1]] for x in self.origins])
+        found_counter = Counter([self.id2label[x[1]] for x in self.founds])
+        right_counter = Counter([self.id2label[x[1]] for x in self.rights])
+        for type_, count in origin_counter.items():
+            origin = count
+            found = found_counter.get(type_, 0)
+            right = right_counter.get(type_, 0)
+            recall, precision, f1 = self.compute(origin, found, right)
+            class_info[type_] = {'precision': round(precision, 4),
+                                 'recall': round(recall, 4),
+                                 'f1': round(f1, 4),
+                                 'gold_num': origin,
+                                 'pred_num': found,
+                                 'right_num': right}
+        origin = len(self.origins)
+        found = len(self.founds)
+        right = len(self.rights)
+        recall, precision, f1 = self.compute(origin, found, right)
+        return {'precision': precision, 'recall': recall, 'f1': f1}, class_info
+
+    def update(self, y_true, y_pred):
+        y_pred = y_pred.cpu().numpy()
+        y_true = y_true.cpu().numpy()
+        pred = []
+        true = []
+        for b, l, start, end in zip(*np.where(y_pred > 0)):
+            pred.append((b, l, start, end))
+        for b, l, start, end in zip(*np.where(y_true > 0)):
+            true.append((b, l, start, end))
+        self.origins.extend(true)
+        self.founds.extend(pred)
+        self.rights.extend([pre_entity for pre_entity in pred if pre_entity in true])
 
     @staticmethod
     def get_sample_f1(y_pred, y_true):

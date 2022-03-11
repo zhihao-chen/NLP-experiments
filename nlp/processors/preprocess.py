@@ -9,7 +9,7 @@
     Change Activity: 
 ======================================
 """
-import re
+import regex
 import unicodedata
 
 
@@ -31,7 +31,7 @@ def is_chinese_char(char):
 
 def is_all_alpha(word):
     pattern = r"[a-zA-Z]"
-    temp = [not re.search(pattern, w) for w in word]
+    temp = [not regex.search(pattern, w) for w in word]
     return not any(temp)
 
 
@@ -42,7 +42,7 @@ def is_not_chinese(sentence):
     :return:
     """
     pattern = r"[\u4e00-\u9fa5]+"
-    res = re.search(pattern, sentence)
+    res = regex.search(pattern, sentence)
     if res:
         return False
     else:
@@ -131,24 +131,24 @@ class Preprocessor(object):
             ent2token = self.tokenizer.tokenize(ent, add_special_tokens=False)
 
             # 寻找ent的token_span
-            token_start_indexs = [i for i, v in enumerate(text2tokens) if v == ent2token[0]]
-            token_end_indexs = [i for i, v in enumerate(text2tokens) if v == ent2token[-1]]
-            token_start_index = list(filter(lambda x: token2char_span_mapping[x][0] == ent_span[0], token_start_indexs))
-            # token2char_span_mapping[x][-1]-1 减1是因为原始的char_span是闭区间，而token2char_span是开区间
-            token_end_index = list(filter(lambda x: token2char_span_mapping[x][-1] - 1 == ent_span[1],
-                                          token_end_indexs))
-            if len(token_start_index) == 0 or len(token_end_index) == 0:
-                print(f'[{ent}] 无法对应到 [{text}] 的token_span，已丢弃')
-                continue
-            token_span = (token_start_index[0], token_end_index[0], ent_span[2])
-            ent2token_spans.append(token_span)
-            # token_start_index = find_head_idx(text2tokens, ent2token)
-            # if token_start_index != -1:
-            #     token_end_index = token_start_index + len(ent2token)
-            #     token_span = (token_start_index, token_end_index, ent_span[2])
-            #     ent2token_spans.append(token_span)
-            # else:
+            # token_start_indexs = [i for i, v in enumerate(text2tokens) if v == ent2token[0]]
+            # token_end_indexs = [i for i, v in enumerate(text2tokens) if v == ent2token[-1]]
+            # token_start_index = list(filter(lambda x: token2char_span_mapping[x][0] == ent_span[0], token_start_indexs))
+            # # token2char_span_mapping[x][-1]-1 减1是因为原始的char_span是闭区间，而token2char_span是开区间
+            # token_end_index = list(filter(lambda x: token2char_span_mapping[x][-1] - 1 == ent_span[1],
+            #                               token_end_indexs))
+            # if len(token_start_index) == 0 or len(token_end_index) == 0:
             #     print(f'[{ent}] 无法对应到 [{text}] 的token_span，已丢弃')
             #     continue
+            # token_span = (token_start_index[0], token_end_index[0], ent_span[2])
+            # ent2token_spans.append(token_span)
+            token_start_index = find_head_idx(text2tokens, ent2token)
+            if token_start_index != -1:
+                token_end_index = token_start_index + len(ent2token)
+                token_span = (token_start_index, token_end_index, ent_span[2])
+                ent2token_spans.append(token_span)
+            else:
+                print(f'[{ent}] 无法对应到 [{text}] 的token_span，已丢弃')
+                continue
 
         return ent2token_spans

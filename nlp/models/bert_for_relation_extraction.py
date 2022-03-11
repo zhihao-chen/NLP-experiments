@@ -10,6 +10,7 @@
 ======================================
 """
 import math
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -17,6 +18,76 @@ from transformers import BertModel
 from nlp.models.bert_model import BertPreTrainedModel
 
 from nlp.models.model_util import HandshakingKernel
+from nlp.layers.global_pointer import GlobalPointer, EfficientGlobalPointer
+
+
+class GlobalPointerForRel(nn.Module):
+    def __init__(self, config,
+                 entity_types_num, relation_num,
+                 head_size=64,
+                 encoder_model_path=None,
+                 rope=True,
+                 tril_mask=True,
+                 efficient=False,
+                 bert_frozen=False):
+        """
+        global pointer用于关系抽取，基于GlobalPointer的仿TPLinker设计
+        :param config:
+        :param encoder_model_path:
+        :param entity_types_num: 实体类型数量
+        :param relation_num:
+        :param head_size:
+        :param rope:
+        :param tril_mask:
+        :param bert_frozen:
+        """
+        super(GlobalPointerForRel, self).__init__()
+        if encoder_model_path:
+            self.encoder = BertModel.from_pretrained(encoder_model_path)
+        else:
+            self.encoder = BertModel(config)
+        self.rope = rope
+        self.tril_mask = tril_mask
+        if efficient:
+            gp_link = EfficientGlobalPointer
+        else:
+            gp_link = GlobalPointer
+
+        self.entity_model = gp_link(
+                                   ent_type_size=entity_types_num,
+                                   head_size=head_size,
+                                   hidden_size=config.hidden_size,
+                                   rope=rope,
+                                   tril_mask=tril_mask
+                                   )
+        self.rel_head_model = gp_link(
+                                     ent_type_size=relation_num,
+                                     head_size=head_size,
+                                     hidden_size=config.hidden_size,
+                                     rope=False,
+                                     tril_mask=False
+                                     )
+        self.rel_tail_model = gp_link(
+                                     ent_type_size=relation_num,
+                                     head_size=head_size,
+                                     hidden_size=config.hidden_size,
+                                     rope=False,
+                                     tril_mask=False)
+        if bert_frozen:
+            self.encoder.embeddings.word_embeddings.weight.requires_grad = False
+            self.encoder.embeddings.position_embeddings.weight.requires_grad = False
+            self.encoder.embeddings.token_type_embeddings.weight.requires_grad = False
+
+    def forward(self, input_ids, attention_mask, token_type_ids):
+        context_outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+        last_hidden_state = context_outputs[0]
+        entity_logit = self.entity_model(last_hidden_state=last_hidden_state, attention_mask=attention_mask)
+        head_logit = self.rel_head_model(last_hidden_state=last_hidden_state, attention_mask=attention_mask)
+        tail_logit = self.rel_tail_model(last_hidden_state=last_hidden_state, attention_mask=attention_mask)
+
+        outputs = {'entity_logits': entity_logit, 'head_logits': head_logit, 'tail_logits': tail_logit}
+        # outputs = {'entity_logits': entity_logit}
+        return outputs
 
 
 class Casrel(BertPreTrainedModel):

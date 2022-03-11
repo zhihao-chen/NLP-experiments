@@ -12,14 +12,25 @@ import shutil
 import torch
 import numpy as np
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
 
 LOGGER = logging.getLogger()
 
 
 def init_summary_writer(log_dir):
+    from torch.utils.tensorboard import SummaryWriter
+
     writer = SummaryWriter(log_dir=log_dir)
     return writer
+
+
+def init_wandb_writer(project_name, train_args, group_name: str = "", experiment_name: str = ""):
+    import wandb
+
+    writer = wandb.init(project=project_name,
+                        group=group_name,
+                        name=experiment_name,
+                        config=train_args)
+    return writer, wandb.run
 
 
 def sorted_checkpoints(output_dir=None, checkpoint_prefix="checkpoint", use_mtime=False) -> List[str]:

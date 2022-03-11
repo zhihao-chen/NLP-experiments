@@ -25,6 +25,7 @@ from nlp.layers.global_pointer import GlobalPointer, EfficientGlobalPointer
 from nlp.metrics.metric import MetricsCalculator
 from nlp.processors.dataset import MyDataset, DataMaker
 from nlp.losses.loss import global_pointer_crossentropy
+from nlp.models.bert_for_ner import GlobalPointerForNER
 
 LOGGER = logging.getLogger(__name__)
 root = os.path.abspath(os.path.dirname(__file__))
@@ -53,9 +54,10 @@ device = torch.device('cuda:0')
 
 tokenizer = BertTokenizerFast.from_pretrained(bert_model_name_or_path, do_lower_case=False, add_special_tokens=True)
 bert_config = BertConfig.from_pretrained(bert_model_name_or_path)
-encoder = BertModel.from_pretrained(bert_model_name_or_path)
+# encoder = BertModel.from_pretrained(bert_model_name_or_path)
 # mymodel = GlobalPointer(encoder, len(label_list), 64)  # 9个实体类型
-mymodel = EfficientGlobalPointer(encoder, len(label_list))
+# mymodel = EfficientGlobalPointer(encoder, len(label_list))
+mymodel = GlobalPointerForNER(bert_config, encoder_model_path=bert_model_name_or_path, num_labels=len(label_list))
 mymodel.to(device)
 
 optimizer = AdamW(params=mymodel.parameters(), lr=lr_rate)
@@ -163,7 +165,8 @@ def evaluate(model, eval_dataloader):
     for i, batch in tqdm(enumerate(eval_dataloader), desc="Evaluating"):
         inputs, label_ids = collate_fn(batch)
         with torch.no_grad():
-            logits = model(**inputs)
+            outputs = model(**inputs)
+            logits = outputs['logits']
             sample_f1, sample_p, sample_r = metric.get_evaluate_fpr(label_ids, logits)
             f1 += sample_f1
             precision += sample_p
@@ -186,9 +189,9 @@ def train(model, train_dataloader, eval_dataloader):
         print("**********************training**********************")
         for step, batch in enumerate(train_dataloader):
             inputs, label_ids = collate_fn(batch)
-            logits = model(**inputs)
+            outputs = model(**inputs)
+            logits = outputs['logits']
             loss = global_pointer_crossentropy(logits, label_ids)
-
             loss.backward()
             tr_loss += loss.item()
             global_steps += 1
@@ -219,9 +222,10 @@ def main():
     best_epoch, best_f1 = train(mymodel, train_dataloader, eval_dataloader)
     print(f"best epoch: {best_epoch}\tbest f1: {best_f1}")
     print("Evaluating")
-    encoder_ = BertModel.from_pretrained(bert_model_name_or_path)
+    # encoder_ = BertModel.from_pretrained(bert_model_name_or_path)
     # eval_model = GlobalPointer(encoder_, len(label_list), 64)
-    eval_model = EfficientGlobalPointer(encoder_, len(label_list), 64)
+    # eval_model = EfficientGlobalPointer(encoder_, len(label_list), 64)
+    eval_model = GlobalPointerForNER(config=bert_config, num_labels=len(label_list))
     eval_model.load_state_dict(torch.load(output_dir+'/pytorch.bin', map_location='cpu'))
     eval_model.to(device)
     f1, precision, recall = evaluate(eval_model, eval_dataloader)
