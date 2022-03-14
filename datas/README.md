@@ -38,3 +38,10 @@ event_schema.json
         }
     ]} 
 ```
+## 关系抽取
+### kg2019
+百度知识抽取竞赛，千言数据
+```
+{"postag": [{"word": "查尔斯", "pos": "nr"}, {"word": "·", "pos": "w"}, {"word": "阿兰基斯", "pos": "nr"}, {"word": "（", "pos": "w"}, {"word": "Charles Aránguiz", "pos": "nz"}, {"word": "）", "pos": "w"}, {"word": "，", "pos": "w"}, {"word": "1989年4月17日", "pos": "t"}, {"word": "出生", "pos": "v"}, {"word": "于", "pos": "p"}, {"word": "智利圣地亚哥", "pos": "ns"}, {"word": "，", "pos": "w"}, {"word": "智利", "pos": "ns"}, {"word": "职业", "pos": "n"}, {"word": "足球", "pos": "n"}, {"word": "运动员", "pos": "n"}, {"word": "，", "pos": "w"}, {"word": "司职", "pos": "v"}, {"word": "中场", "pos": "n"}, {"word": "，", "pos": "w"}, {"word": "效力", "pos": "v"}, {"word": "于", "pos": "p"}, {"word": "德国", "pos": "ns"}, {"word": "足球", "pos": "n"}, {"word": "甲级", "pos": "a"}, {"word": "联赛", "pos": "n"}, {"word": "勒沃库森足球俱乐部", "pos": "nt"}], "text": "查尔斯·阿兰基斯（Charles Aránguiz），1989年4月17日出生于智利圣地亚哥，智利职业足球运动员，司职中场，效力于德国足球甲级联赛勒沃库森足球俱乐部", "spo_list": [{"predicate": "出生地", "object_type": "地点", "subject_type": "人物", "object": "圣地亚哥", "subject": "查尔斯·阿兰基斯"}, {"predicate": "出生日期", "object_type": "Date", "subject_type": "人物", "object": "1989年4月17日", "subject": "查尔斯·阿兰基斯"}]}
+{"postag": [{"word": "《", "pos": "w"}, {"word": "离开", "pos": "nw"}, {"word": "》", "pos": "w"}, {"word": "是", "pos": "v"}, {"word": "由", "pos": "p"}, {"word": "张宇", "pos": "nr"}, {"word": "谱曲", "pos": "v"}, {"word": "，", "pos": "w"}, {"word": "演唱", "pos": "v"}], "text": "《离开》是由张宇谱曲，演唱", "spo_list": [{"predicate": "歌手", "object_type": "人物", "subject_type": "歌曲", "object": "张宇", "subject": "离开"}, {"predicate": "作曲", "object_type": "人物", "subject_type": "歌曲", "object": "张宇", "subject": "离开"}]}
+```

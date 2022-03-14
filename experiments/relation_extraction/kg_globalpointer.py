@@ -324,9 +324,9 @@ def extract_spoes(model, eval_dataloader, threshold=0):
 
             # 抽取subject和object
             subjects, objects = set(), set()
-            outputs[0][:, [0, -1]] -= np.inf
-            outputs[0][:, :, [0, -1]] -= np.inf
-            for l_, h, t in zip(*np.where(outputs[0] > threshold)):
+            entity_output[:, [0, -1]] -= np.inf
+            entity_output[:, :, [0, -1]] -= np.inf
+            for l_, h, t in zip(*np.where(entity_output > threshold)):
                 if l_ == 0:
                     subjects.add((h, t))
                 else:
@@ -335,8 +335,8 @@ def extract_spoes(model, eval_dataloader, threshold=0):
             spoes = set()
             for sh, st in subjects:
                 for oh, ot in objects:
-                    p1s = np.where(outputs[1][:, sh, oh] > threshold)[0]
-                    p2s = np.where(outputs[2][:, st, ot] > threshold)[0]
+                    p1s = np.where(head_output[:, sh, oh] > threshold)[0]
+                    p2s = np.where(tai_output[:, st, ot] > threshold)[0]
                     ps = set(p1s) & set(p2s)
                     for p in ps:
                         try:
