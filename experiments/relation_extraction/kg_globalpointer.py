@@ -116,7 +116,7 @@ optimizer_grouped_parameters = [
      'lr': config['lr_rate']}
 ]
 
-optimizer = Adam(params=optimizer_grouped_parameters, lr=config['lr_rate'])
+optimizer = AdamW(params=optimizer_grouped_parameters, lr=config['lr_rate'])
 ema = EMA(my_model, 0.999)
 ema.register()
 
