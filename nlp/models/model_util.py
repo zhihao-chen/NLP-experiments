@@ -19,11 +19,17 @@ import numpy as np
 class LayerNorm(nn.Module):
     def __init__(self, input_dim, cond_dim=0, center=True, scale=True, epsilon=None, conditional=False,
                  hidden_units=None, hidden_initializer='xaiver'):
+        """
+        :param input_dim: inputs.shape[-1]
+        :param cond_dim: cond.shape[-1]
+        :param center:
+        :param scale:
+        :param epsilon:
+        :param conditional: 如果为True，则是条件LayerNorm
+        :param hidden_units:
+        :param hidden_initializer:
+        """
         super(LayerNorm, self).__init__()
-        """
-        input_dim: inputs.shape[-1]
-        cond_dim: cond.shape[-1]
-        """
         self.center = center
         self.scale = scale
         self.conditional = conditional
