@@ -288,7 +288,8 @@ def test_1(query_list, example_list):
 
 def test2(query_list, example_list):
     root_dir = "/data2/work2/chenzhihao/NLP/experiments/"
-    model_name_or_path = root_dir + "output_file_dir/semantic_match/STS-B-unsup_simcse-roberta-2022-07-01_09"
+    # model_name_or_path = root_dir + "output_file_dir/semantic_match/STS-B-unsup_simcse-roberta-2022-07-01_09"
+    model_name_or_path = "/data2/work2/chenzhihao/gpt-to-qa/datas/output_dir/semantic_match/STS-B-unsup_simcse-roberta"
     device = "cuda:7"
     max_seq_length = 128
     word_embedding_model = models.Transformer(model_name_or_path)
@@ -310,8 +311,13 @@ def test2(query_list, example_list):
 
     for i, result in enumerate(cosine_scores):
         print("Retrieval results for query: {}".format(query_list[i]))
+        sent_score = []
         for j, score in enumerate(result):
-            print("{}   (cosine similarity: {:.4f})".format(example_list[j], score))
+            # print("{}   (cosine similarity: {:.4f})".format(example_list[j], score))
+            sent_score.append((example_list[j], score))
+        new_sent_score = sorted(sent_score, key=lambda k: k[1], reverse=True)
+        for (sent, score) in new_sent_score:
+            print("{}  (cosine similarity: {:.4f})".format(sent, score))
 
 
 if __name__ == "__main__":
@@ -321,10 +327,8 @@ if __name__ == "__main__":
         "无法下载歌曲",
         "下载不了歌曲",
         "下载不了",
-        "付费后会员未开通",
-        "充值没到账",
     ]
 
     queries = ["充值未到账"]
-    test_1(queries, keys)
+    # test_1(queries, keys)
     test2(queries, keys)
