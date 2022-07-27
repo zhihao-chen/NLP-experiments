@@ -288,8 +288,7 @@ def test_1(query_list, example_list):
 
 def test2(query_list, example_list):
     root_dir = "/data2/work2/chenzhihao/NLP/experiments/"
-    # model_name_or_path = root_dir + "output_file_dir/semantic_match/STS-B-unsup_simcse-roberta-2022-07-01_09"
-    model_name_or_path = "/data2/work2/chenzhihao/gpt-to-qa/datas/output_dir/semantic_match/STS-B-unsup_simcse-roberta"
+    model_name_or_path = root_dir + "output_file_dir/semantic_match/STS-B-unsup_simcse-roberta-2022-07-01_09"
     device = "cuda:7"
     max_seq_length = 128
     word_embedding_model = models.Transformer(model_name_or_path)
