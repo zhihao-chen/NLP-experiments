@@ -90,20 +90,24 @@ class SentDataSet(Dataset):
             neg_inputs = self.tokenizer(neg_sent, truncation=True, max_length=self.max_seq_length)
             neg_input_ids = neg_inputs['input_ids']
             neg_attention_mask = neg_inputs['attention_mask']
-            return {'anchor_input_ids': anchor_input_ids,
-                    'pos_input_ids': pos_input_ids,
-                    'neg_input_ids': neg_input_ids,
-                    'anchor_attention_mask': anchor_attention_mask,
-                    'pos_attention_mask': pos_attention_mask,
-                    'neg_attention_mask': neg_attention_mask,
-                    'label': label
-                    }
+            return {
+                'idx': idx,
+                'anchor_input_ids': anchor_input_ids,
+                'pos_input_ids': pos_input_ids,
+                'neg_input_ids': neg_input_ids,
+                'anchor_attention_mask': anchor_attention_mask,
+                'pos_attention_mask': pos_attention_mask,
+                'neg_attention_mask': neg_attention_mask,
+                'label': label
+                }
         else:
-            return {'anchor_input_ids': anchor_input_ids,
-                    'pos_input_ids': pos_input_ids,
-                    'anchor_attention_mask': anchor_attention_mask,
-                    'pos_attention_mask': pos_attention_mask,
-                    'label': label
+            return {
+                'idx': idx,
+                'anchor_input_ids': anchor_input_ids,
+                'pos_input_ids': pos_input_ids,
+                'anchor_attention_mask': anchor_attention_mask,
+                'pos_attention_mask': pos_attention_mask,
+                'label': label
                     }
 
 
@@ -125,7 +129,7 @@ def collate_fn(batch_data):
         pos_max_len = max(pos_max_len, len(d['pos_input_ids']))
         if num_sent == 3:
             neg_max_len = max(neg_max_len, len(d['neg_input_ids']))
-
+    idx_lst = []
     anchor_input_ids_lst = []
     pos_input_ids_lst = []
     neg_input_ids_lst = []
@@ -134,6 +138,7 @@ def collate_fn(batch_data):
     neg_attention_mask_lst = []
     label_lst = []
     for item in batch_data:
+        idx_lst.append(item['idx'])
         anchor_input_ids_lst.append(pad_to_maxlen(item['anchor_input_ids'], max_len=anchor_max_len))
         pos_input_ids_lst.append(pad_to_maxlen(item['pos_input_ids'], max_len=pos_max_len))
         anchor_attention_mask_lst.append(pad_to_maxlen(item['anchor_attention_mask'], max_len=anchor_max_len))
@@ -156,6 +161,7 @@ def collate_fn(batch_data):
         neg_input_ids = torch.LongTensor(neg_input_ids_lst)
         neg_attention_masks = torch.LongTensor(neg_attention_mask_lst)
         return {
+            'id_lst': idx_lst,
             'anchor_input_ids': anchor_input_ids,
             'pos_input_ids': pos_input_ids,
             'neg_input_ids': neg_input_ids,
@@ -166,6 +172,7 @@ def collate_fn(batch_data):
         }
     else:
         return {
+            'id_lst': idx_lst,
             'anchor_input_ids': anchor_input_ids,
             'pos_input_ids': pos_input_ids,
             'anchor_attention_mask': anchor_attention_masks,
