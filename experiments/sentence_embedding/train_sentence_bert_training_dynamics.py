@@ -284,7 +284,7 @@ def train(train_samples, valid_samples, model, tokenizer, args):
         # 在每一个epoch之后，对train set所有样本再过一遍，记录dynamics
         # 每个epoch单独一个文件
         if args.do_recording:
-            dy_log_path = os.path.join(args.dy_log_path, args.task_name, args.model_name, "training_dynamics")
+            dy_log_path = os.path.join(args.dy_log_path, args.task_type, args.model_type, "training_dynamics")
             if not os.path.exists(dy_log_path):
                 os.makedirs(dy_log_path)
             writer = codecs.open(os.path.join(args.dy_log_path, f'dynamics_epoch_{epoch}.json'), 'w', encoding='utf8')
