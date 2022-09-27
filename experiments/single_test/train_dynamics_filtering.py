@@ -378,6 +378,8 @@ class Config:
     worst = False
     burn_out = 5
     include_ci = False
+    # To select hard-to-learn instances, set $METRIC as "confidence" and for ambiguous, set $METRIC as "variability".
+    # For easy-to-learn instances: set $METRIC as "confidence" and use the flag --worst
     metric = None
 
 

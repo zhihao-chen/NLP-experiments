@@ -36,9 +36,10 @@ args = Config()
 TASK_NAME = args.task_name
 MODEL = args.model_name
 PROPORTION = args.proportion
+LOG_PATH = '/root/work2/work2/chenzhihao/NLP/output_file_dir/semantic_match'
 
 # 读取并合并到一个文件
-td = read_training_dynamics(f'dy_log/{TASK_NAME}/{MODEL}/')
+td = read_training_dynamics(LOG_PATH + f'dy_logs/{TASK_NAME}/{MODEL}/')
 # 计算 metrics，转化成一个 dataframe
 td_df, _ = compute_train_dy_metrics(td, burn_out=args.burn_out)
 
