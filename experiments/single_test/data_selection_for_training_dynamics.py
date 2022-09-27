@@ -84,7 +84,7 @@ three_regions_data_indices = {'hard': data_selection('confidence', False, PROPOR
                               'easy': data_selection('confidence', True, PROPORTION)['indices'],
                               'ambiguous': data_selection('variability', False, PROPORTION)['indices']}
 
-with open(f'dy_log/{TASK_NAME}/{MODEL}/three_regions_data_indices.json', 'w', encoding='utf8') as f:
+with open(LOG_PATH + f'dy_logs/{TASK_NAME}/{MODEL}/three_regions_data_indices.json', 'w', encoding='utf8') as f:
     f.write(json.dumps(three_regions_data_indices, ensure_ascii=False))
 
 # 然后可以直接跑glue任务，在选择训练集的时候，使用select函数来指定对应样本即可：
