@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: czh
-@email: zhihao.chen@kuwo.cn
+@email:
 @date: 2022/7/6 11:20
 """
 # 无监督CoSENT

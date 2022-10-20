@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: czh
-@email: zhihao.chen@kuwo.cn
+@email:
 @date: 2022/8/2 10:46
 """
 import warnings

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: czh
-@email: zhihao.chen@kuwo.cn
+@email:
 @date: 2022/7/1 16:08
 """
 # 无监督simcse实验

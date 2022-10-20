@@ -209,3 +209,89 @@ def compute_kl_loss(p, q, pad_mask=None, merge_mode="sum"):
 
     loss = (p_loss + q_loss) / 2
     return loss
+
+
+class VaSCLContrastiveLoss(nn.Module):
+    """
+    https://github.com/amazon-research/sentence-representations/blob/main/VaSCL/learners/contrastive_utils.py
+    """
+    def __init__(self, temperature=0.05, topk=16):
+        super(VaSCLContrastiveLoss, self).__init__()
+        self.temperature = temperature
+        self.topk = topk
+        print(f"PosConLoss with temperature={temperature}, \t topk={topk}")
+
+    def forward(self, features_1, features_2):
+        device = features_1.device
+        batch_size = features_1.shape[0]
+        features = torch.cat([features_1, features_2], dim=0)
+        mask = torch.eye(batch_size, dtype=torch.bool).to(device)
+        mask = mask.repeat(2, 2)
+        mask = ~mask
+
+        pos = torch.exp(torch.sum(features_1 * features_2, dim=-1) / self.temperature)
+        pos = torch.cat([pos, pos], dim=0)
+        neg = torch.exp(torch.mm(features, features.t().contiguous()) / self.temperature)
+        neg = neg.masked_select(mask).view(2 * batch_size, -1)
+
+        ng = neg.sum(dim=-1)
+        loss_pos = (- torch.log(pos / (ng + pos))).mean()
+        return {"loss": loss_pos}
+
+
+class VaSCLNUniDir(nn.Module):
+    """
+        https://github.com/amazon-research/sentence-representations/blob/main/VaSCL/learners/contrastive_utils.py
+    """
+    def __init__(self, temperature=0.05):
+        super(VaSCLNUniDir, self).__init__()
+        self.temperature = temperature
+
+    def forward(self, features_1, features_2, hard_indices=None):
+        device = features_1.device
+        batch_size = features_1.shape[0]
+        mask = torch.eye(batch_size, dtype=torch.bool).to(device)
+        mask = ~mask
+
+        pos = torch.exp(torch.sum(features_1 * features_2, dim=-1) / self.temperature)
+        neg = torch.exp(torch.mm(features_2, features_1.t().contiguous()) / self.temperature)
+        neg = neg.masked_select(mask).view(batch_size, -1)
+
+        hard_mask = torch.zeros_like(neg, dtype=torch.int32).to(device)
+        hard_mask = hard_mask.scatter_(1, hard_indices, 1) > 0
+        hardneg = neg.masked_select(hard_mask).view(batch_size, -1)
+
+        ng = hardneg.sum(dim=-1)
+        loss_pos = (- torch.log(pos / (ng + pos))).mean()
+        return {"lds_loss": loss_pos}
+
+
+class VaSCLNBiDir(nn.Module):
+    """
+        https://github.com/amazon-research/sentence-representations/blob/main/VaSCL/learners/contrastive_utils.py
+    """
+    def __init__(self, temperature=0.05):
+        super(VaSCLNBiDir, self).__init__()
+        self.temperature = temperature
+
+    def forward(self, features_1, features_2, hard_indices=None):
+        device = features_1.device
+        batch_size = features_1.shape[0]
+        features = torch.cat([features_1, features_2], dim=0)
+        mask = torch.eye(batch_size, dtype=torch.bool).to(device)
+        mask = mask.repeat(2, 2)
+        mask = ~mask
+
+        pos = torch.exp(torch.sum(features_1 * features_2, dim=-1) / self.temperature)
+        pos = torch.cat([pos, pos], dim=0)
+        neg = torch.exp(torch.mm(features, features.t().contiguous()) / self.temperature)
+        neg = neg.masked_select(mask).view(2 * batch_size, -1)
+
+        hard_mask = torch.zeros(int(neg.shape[0] / 2), int(neg.shape[1] / 2), dtype=torch.int32).to(device)
+        hard_mask = hard_mask.scatter_(1, hard_indices, 1) > 0
+        hard_mask = hard_mask.repeat(2, 2)
+        hardneg = neg.masked_select(hard_mask).view(2 * batch_size, -1)
+
+        ng = hardneg.sum(dim=-1)
+        loss_pos = (- torch.log(pos / (ng + pos))).mean()
+        return {"lds_loss": loss_pos}

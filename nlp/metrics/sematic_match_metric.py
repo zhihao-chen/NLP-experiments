@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 @author: czh
-@email: zhihao.chen@kuwo.cn
+@email:
 @date: 2022/6/30 10:54
 """
 import numpy as np
-import scipy.stats
+import scipy.stats as sta
 
 
 def l2_normalize(vecs):
@@ -19,7 +19,7 @@ def l2_normalize(vecs):
 def compute_corrcoef(x, y):
     """Spearman相关系数
     """
-    return scipy.stats.spearmanr(x, y).correlation
+    return sta.spearmanr(x, y).correlation
 
 
 def compute_pearsonr(x, y):
@@ -27,4 +27,4 @@ def compute_pearsonr(x, y):
     # r:相关系数[-1，1]之间
     # p:相关系数显著性
     # 所有下面的数据选第零位
-    return scipy.stats.pearsonr(x, y)[0]
+    return sta.pearsonr(x, y)[0]

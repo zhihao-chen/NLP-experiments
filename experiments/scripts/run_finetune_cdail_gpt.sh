@@ -1,4 +1,4 @@
-PROJECT_PATH=/data2/work2/chenzhihao/NLP-experiments
+PROJECT_PATH=/data2/work2/chenzhihao/NLP
 DATA_PATH=$PROJECT_PATH/datas/raw_datas/
 OUTPUT_DIR=$PROJECT_PATH/datas/output_dir/CDail-GPT-QA
 MODEL_CHECKPOINT=$PROJECT_PATH/datas/output_dir/CDail-GPT-QA

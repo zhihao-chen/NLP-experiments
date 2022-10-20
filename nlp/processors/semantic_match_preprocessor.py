@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: czh
-@email: zhihao.chen@kuwo.cn
+@email:
 @date: 2022/6/28 17:00
 """
 import codecs
@@ -179,3 +179,103 @@ def collate_fn(batch_data):
             'pos_attention_mask': pos_attention_masks,
             'label': labels
         }
+
+
+class VaSCLDataset(Dataset):
+    def __init__(self, dataset, tokenizer, args, padding=True):
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+        self.args = args
+        self.padding = padding
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def get_batch_token(self, text):
+        token_feat = self.tokenizer(
+            text,
+            max_length=self.args.max_seq_length,
+            padding='max_length',
+            truncation=True
+        )
+        return token_feat
+
+    def __getitem__(self, idx):
+        dataset = self.dataset[idx]
+        assert len(dataset) <= 3
+        if len(dataset) == 3:
+            text1 = dataset[0]
+            text2 = dataset[1]
+            label = dataset[2]
+        else:
+            text1 = dataset[0]
+            text2 = dataset[0]
+            label = None
+
+        feat1 = self.get_batch_token(text1)
+        feat2 = self.get_batch_token(text2)
+        # if label is None:
+        #     input_ids = torch.cat([feat1['input_ids'].unsqueeze(1), feat2['input_ids'].unsqueeze(1)], dim=1)
+        #     attention_mask = torch.cat([feat1['attention_mask'].unsqueeze(1), feat2['attention_mask'].unsqueeze(1)],
+        #                                dim=1)
+        #     return {
+        #         'input_ids': input_ids.to(self.args.device),
+        #         'attention_mask': attention_mask.to(self.args.device)
+        #     }
+        return {
+            'pos_inputs': {
+                'input_ids': feat1['input_ids'],
+                'attention_mask': feat1['attention_mask']
+            },
+            'neg_inputs': {
+                'input_ids': feat2['input_ids'],
+                'attention_mask': feat2['attention_mask']
+            },
+            'label': label
+        }
+
+    def collate_fn(self, batch):
+        label = batch[0]['label']
+        if label is None:
+            batch_input_ids = []
+            batch_attention_mask = []
+            for item in batch:
+                input_ids = [item['pos_inputs']['input_ids'], item['neg_inputs']['input_ids']]
+                attention_mask = [item['pos_inputs']['attention_mask'], item['neg_inputs']['attention_mask']]
+                batch_input_ids.append(input_ids)
+                batch_attention_mask.append(attention_mask)
+            return {
+                'input_ids': torch.LongTensor(batch_input_ids).to(self.args.device),
+                'attention_mask': torch.LongTensor(batch_attention_mask).to(self.args.device)
+            }
+        else:
+            batch_pos_input_ids = []
+            batch_pos_attention_mask = []
+            batch_neg_input_ids = []
+            batch_neg_attention_mask = []
+            batch_labels = []
+            for item in batch:
+                pos_input_ids = item['pos_inputs']['input_ids']
+                pos_attention_mask = item['pos_inputs']['attention_mask']
+
+                neg_input_ids = item['neg_inputs']['input_ids']
+                neg_attention_mask = item['neg_inputs']['attention_mask']
+
+                batch_pos_input_ids.append(pos_input_ids)
+                batch_pos_attention_mask.append(pos_attention_mask)
+                batch_neg_input_ids.append(neg_input_ids)
+                batch_neg_attention_mask.append(neg_attention_mask)
+
+                batch_labels.append(item['label'])
+
+            return {
+                'pos_inputs': {
+                    'input_ids': torch.LongTensor(batch_pos_input_ids).to(self.args.device),
+                    'attention_mask': torch.LongTensor(batch_pos_attention_mask).to(self.args.device)
+                },
+                'neg_inputs': {
+                    'input_ids': torch.LongTensor(batch_neg_input_ids).to(self.args.device),
+                    'attention_mask': torch.LongTensor(batch_neg_attention_mask).to(self.args.device)
+                },
+                'label': batch_labels
+            }
