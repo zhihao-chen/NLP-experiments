@@ -267,9 +267,9 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     print("  Total optimization steps = %d", num_train_optimization_steps)
 
     WANDB.watch(model, log='all')
-    global_steps = 0
     model.to(args['device'])
     model.zero_grad()
+    global_steps = 0
     best_score = 0.0
     best_score_pearsonr = 0.0
     best_epoch = 0
@@ -278,9 +278,10 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     for epoch in range(args['num_train_epochs']):
         model.train()
         total_loss = 0.0
+        epoch_steps = 0
         print(f"******** {epoch}/{args['num_train_epochs']} ********")
         for step, batch in enumerate(tqdm(train_dataloader,
-                                          desc=f"Training unsupCoSENT on {args['data_type']}")):
+                                          desc=f"Training supCoSENT on {args['data_type']}")):
             inputs = {
                 'input_ids': batch['input_ids'].to(args['device']),
                 'attention_mask': batch['attention_mask'].to(args['device'])
@@ -292,14 +293,15 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
             if args['gradient_accumulation_steps'] > 1:
                 loss = loss / args['gradient_accumulation_steps']
             loss.backward()
-            WANDB.log({'Train/loss': loss.item()})
 
             if (step + 1) % args['gradient_accumulation_steps'] == 0:
                 total_loss += loss.item()
                 optimizer.step()
                 scheduler.step()
                 model.zero_grad()
+                epoch_steps += 1
                 global_steps += 1
+                WANDB.log({'Train/loss': total_loss/epoch_steps})
 
             # if (step + 1) % args['eval_steps'] == 0:
         corrcoef, pearsonr = evaluate(valid_samples, model, tokenizer, args)
