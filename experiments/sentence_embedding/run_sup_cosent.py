@@ -5,7 +5,8 @@
 @email:
 @date: 2022/7/6 11:20
 """
-# 无监督CoSENT
+import codecs
+# 有监督监督CoSENT
 # https://github.com/shawroad/Semantic-Textual-Similarity-Pytorch/blob/main/CoSENT/run_cosent.py
 import os
 import sys
@@ -19,7 +20,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from transformers import BertTokenizer, BertConfig, get_scheduler, AdamW, set_seed
 
-sys.path.append('/data2/work2/chenzhihao/NLP')
+dirname = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join('/'.join(dirname.split('/')[:-2])))
 
 from nlp.tools.common import init_wandb_writer
 from nlp.models.sentence_embedding_models import CoSENT
@@ -111,7 +113,7 @@ def collate_fn(batch):
     }
 
 
-def calc_loss(y_true, y_pred):
+def calc_loss(y_true, y_pred, args):
     # 1. 取出真实的标签
     y_true = y_true[::2]  # tensor([1, 0, 1]) 真实的标签
 
@@ -131,7 +133,7 @@ def calc_loss(y_true, y_pred):
     y_pred = y_pred - (1 - y_true) * 1e12
     y_pred = y_pred.view(-1)
     if torch.cuda.is_available():
-        y_pred = torch.cat((torch.tensor([0]).float().cuda(), y_pred), dim=0)  # 这里加0是因为e^0 = 1相当于在log中加了1
+        y_pred = torch.cat((torch.tensor([0]).float().to(args['device']), y_pred), dim=0)  # 这里加0是因为e^0 = 1相当于在log中加了1
     else:
         y_pred = torch.cat((torch.tensor([0]).float(), y_pred), dim=0)  # 这里加0是因为e^0 = 1相当于在log中加了1
 
@@ -251,10 +253,10 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     optimizer, scheduler = init_optimizer(t_total, optimizer_grouped_parameters, args)
 
     global WANDB
-    WANDB, run = init_wandb_writer(project_name='unsup-cosent',
+    WANDB, run = init_wandb_writer(project_name='semantic_match',
                                    train_args=train_config,
-                                   group_name="semantic_match",
-                                   experiment_name="roberta")
+                                   group_name="nlp",
+                                   experiment_name="atec-unsup_cosent-roberta-wwm-ext")
 
     # Train!
     print("***** Running training *****")
@@ -269,6 +271,7 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     model.to(args['device'])
     model.zero_grad()
     best_score = 0.0
+    best_score_pearsonr = 0.0
     best_epoch = 0
     set_seed(args['seed'])
 
@@ -284,7 +287,7 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
             }
             label_ids = batch['labels'].to(args['device'])
             logits = model(**inputs)
-            loss = calc_loss(label_ids, logits)
+            loss = calc_loss(label_ids, logits, args)
 
             if args['gradient_accumulation_steps'] > 1:
                 loss = loss / args['gradient_accumulation_steps']
@@ -298,27 +301,32 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
                 model.zero_grad()
                 global_steps += 1
 
-            if (step + 1) % args['eval_steps'] == 0:
-                corrcoef, pearsonr = evaluate(valid_samples, model, tokenizer, args)
-                WANDB.log({'Evaluation/corrcoef': corrcoef, 'Evaluation/pearsonr': pearsonr}, step=global_steps)
-                print(f"evaluate results: corrcoef: {corrcoef}\tpearsonr: {pearsonr}")
-                if pearsonr > best_score:
-                    best_score = pearsonr
-                    best_epoch = best_epoch
+            # if (step + 1) % args['eval_steps'] == 0:
+        corrcoef, pearsonr = evaluate(valid_samples, model, tokenizer, args)
+        WANDB.log({'Evaluation/corrcoef': corrcoef, 'Evaluation/pearsonr': pearsonr}, step=global_steps)
+        print(f"evaluate results: corrcoef: {corrcoef}\tpearsonr: {pearsonr}")
+        if corrcoef > best_score:
+            best_score = corrcoef
+            best_score_pearsonr = pearsonr
+            best_epoch = best_epoch
 
-                    model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-                    output_file = os.path.join(args['model_save_path'], 'best_model.bin')
-                    torch.save(model_to_save.state_dict(), output_file)
+            model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+            output_file = os.path.join(args['model_save_path'], 'best_model.bin')
+            torch.save(model_to_save.state_dict(), output_file)
+            with codecs.open(os.path.join(args['model_save_path'], "eval_result.txt"), "w", encoding="utf8") as fw:
+                fw.write("best_epoch: {}\tpearsonr: {}\tspearman: {}".format(best_epoch,
+                                                                             best_score_pearsonr,
+                                                                             best_score))
 
 
 def main():
-    root_path = "/data2/work2/chenzhihao/NLP"
+    root_path = "/root/work2/work2/chenzhihao/NLP"
     config = {
-        'model_type': "roberta",
-        'model_name_or_path': "/data2/work2/chenzhihao/NLP/pretrained_models/chinese-roberta-wwm-ext",
+        'model_type': "roberta-wwm-ext",
+        'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'output_dir': root_path + "/experiments/output_file_dir/semantic_match",
-        'config_path': "/data2/work2/chenzhihao/NLP/pretrained_models/chinese-roberta-wwm-ext",
-        'tokenizer_path': "/data2/work2/chenzhihao/NLP/pretrained_models/chinese-roberta-wwm-ext",
+        'config_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
+        'tokenizer_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'do_train': True,
         'do_test': True,
         'lr_rate': 2e-5,
@@ -327,7 +335,7 @@ def main():
         'adam_epsilon': 1e-8,
         'weight_decay': 0.01,
         'scheduler_type': 'linear',
-        'train_batch_size': 64,
+        'train_batch_size': 64,  # 必须是2的倍数
         'valid_batch_size': 64,
         'test_batch_size': 64,
         'num_train_epochs': 30,
@@ -336,11 +344,11 @@ def main():
         'object_type': "classification",  # classification, regression, triplet
         'task_type': "match",  # "match" or "nli"
         'pooling_strategy': "cls",  # first-last-avg, last-avg, cls, pooler
-        'data_type': "ATEC",  # ATEC, BQ, LCQMC, PAWSX, STS-B
+        'data_type': "STS-B",  # ATEC, BQ, LCQMC, PAWSX, STS-B
         'train_dataset': "train.data",
         'valid_dataset': "valid.data",
         'test_dataset': "test.data",
-        'cuda_number': "0",
+        'cuda_number': "3",
         'num_worker': 4,
         'seed': 2333
     }
@@ -353,10 +361,10 @@ def main():
         'scheduler_type': config['scheduler_type']
     }
 
-    data_dir = "/data2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/" + config['data_type']
+    data_dir = "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/" + config['data_type']
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
-    model_save_path = f"{config['output_dir']}/{config['data_type']}-unsupcosent-{config['model_type']}"
+    model_save_path = f"{config['output_dir']}/{config['data_type']}-supcosent-{config['model_type']}"
     config['model_save_path'] = model_save_path
     if not os.path.exists(model_save_path):
         os.makedirs(model_save_path)
@@ -381,6 +389,8 @@ def main():
 
         corrcoef, pearsonr = evaluate(test_samples, model, tokenizer, config)
         print(f"test results: corrcoef: {corrcoef}\tpearsonr: {pearsonr}")
+        with codecs.open(os.path.join(model_save_path, 'test_result.txt'), "w", encoding="utf8") as fw:
+            fw.write("pearsonr: {}\tspearman: {}".format(pearsonr, corrcoef))
 
 
 if __name__ == "__main__":
