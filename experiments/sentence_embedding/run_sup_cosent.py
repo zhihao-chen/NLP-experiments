@@ -256,7 +256,7 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     WANDB, run = init_wandb_writer(project_name='semantic_match',
                                    train_args=train_config,
                                    group_name="nlp",
-                                   experiment_name="atec-unsup_cosent-roberta-wwm-ext")
+                                   experiment_name="sts-b-sup_cosent-roberta-wwm-ext")
 
     # Train!
     print("***** Running training *****")
