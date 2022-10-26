@@ -119,8 +119,8 @@ def calc_loss(y_true, y_pred, args):
 
     # 2. 对输出的句子向量进行l2归一化   后面只需要对应为相乘  就可以得到cos值了
     norms = (y_pred ** 2).sum(axis=1, keepdims=True) ** 0.5
-    # y_pred = y_pred / torch.clip(norms, 1e-8, torch.inf)
-    y_pred = y_pred / norms
+    y_pred = y_pred / torch.clip(norms, 1e-8, torch.inf)
+    # y_pred = y_pred / norms
 
     # 3. 奇偶向量相乘
     y_pred = torch.sum(y_pred[::2] * y_pred[1::2], dim=1) * 20
@@ -161,7 +161,7 @@ def evaluate(test_dataset, model, tokenizer, args):
     all_labels = []
     model.eval()
     for step, (s1, s2, lab) in enumerate(tqdm(zip(sent1, sent2, label),
-                                         desc=f"Evaluating unsupCoSENT on {args['data_type']}")):
+                                         desc=f"Evaluating supCoSENT on {args['data_type']}")):
         input_ids, input_mask, segment_ids = get_sent_id_tensor([s1, s2], tokenizer)
         lab = torch.tensor([lab], dtype=torch.float)
 
@@ -305,8 +305,8 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
 
             # if (step + 1) % args['eval_steps'] == 0:
         corrcoef, pearsonr = evaluate(valid_samples, model, tokenizer, args)
-        WANDB.log({'Evaluation/corrcoef': corrcoef, 'Evaluation/pearsonr': pearsonr}, step=global_steps)
-        print(f"evaluate results: corrcoef: {corrcoef}\tpearsonr: {pearsonr}")
+        WANDB.log({'Evaluation/spearman': corrcoef, 'Evaluation/pearsonr': pearsonr}, step=global_steps)
+        print(f"evaluate results: spearman: {corrcoef}\tpearsonr: {pearsonr}")
         if corrcoef > best_score:
             best_score = corrcoef
             best_score_pearsonr = pearsonr
@@ -390,7 +390,7 @@ def main():
         model.to(device)
 
         corrcoef, pearsonr = evaluate(test_samples, model, tokenizer, config)
-        print(f"test results: corrcoef: {corrcoef}\tpearsonr: {pearsonr}")
+        print(f"test results: spearman: {corrcoef}\tpearsonr: {pearsonr}")
         with codecs.open(os.path.join(model_save_path, 'test_result.txt'), "w", encoding="utf8") as fw:
             fw.write("pearsonr: {}\tspearman: {}".format(pearsonr, corrcoef))
 

@@ -35,15 +35,15 @@ TRAIN_CONFIG = {
 }
 
 
-def init_model(model_name, device, max_seq_length):
+def init_model(model_name, device, max_seq_length, pool_type='mean'):
     # Use Huggingface/transformers model (like BERT, RoBERTa, XLNet, XLM-R) for mapping tokens to embeddings
     word_embedding_model = models.Transformer(model_name)
 
     # Apply mean pooling to get one fixed sized sentence vector
     pooling_model = models.Pooling(word_embedding_model.get_word_embedding_dimension(),
-                                   pooling_mode_mean_tokens=True,
-                                   pooling_mode_cls_token=False,
-                                   pooling_mode_max_tokens=False)
+                                   pooling_mode_mean_tokens=pool_type == "mean",
+                                   pooling_mode_cls_token=pool_type == "cls",
+                                   pooling_mode_max_tokens=pool_type == "max")
     model = SentenceTransformer(modules=[word_embedding_model, pooling_model], device=device)
     model.__setattr__("max_seq_length", max_seq_length)
     return model
@@ -102,32 +102,32 @@ def test_model(model_save_path, test_evaluator):
 def main():
     config = {
         'model_type': "roberta",
-        'model_name': "/data2/work2/chenzhihao/NLP/pretrained_models/chinese-roberta-wwm-ext",
+        'model_name': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'batch_size': 64,
         'num_epochs': 30,
         'max_seq_length': 64,
         'data_type': "STS-B",  # ATEC, BQ, LCQMC, PAWSX, STS-B
+        'pooler': "mean",  # mean, cls, max
         'object_type': "regression",  # classifier, regression, triplet
         'train_dataset': "train.data",
         'valid_dataset': "valid.data",
         'test_dataset': "test.data",
-        'cuda_number': 0
+        'cuda_number': 1
     }
 
-    root_path = "/data2/work2/chenzhihao/NLP"
-    data_dir = "/data2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/" + config['data_type']
+    root_path = "/root/work2/work2/chenzhihao/NLP"
+    data_dir = "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/" + config['data_type']
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
     output_dir = root_path + "/experiments/output_file_dir/semantic_match"
-    date = datetime.now().strftime("%Y-%m-%d_%H")
-    model_save_path = output_dir + f"/{config['data_type']}-sbert-{config['model_type']}-{date}"
+    model_save_path = output_dir + f"/{config['data_type']}-sbert-{config['model_type']}-{config['pooler']}"
     config['model_save_path'] = model_save_path
     if not os.path.exists(model_save_path):
         os.makedirs(model_save_path)
 
     device = torch.device(f"cuda:{config['cuda_number']}") if torch.cuda.is_available() else torch.device('cpu')
     # 初始化模型
-    model = init_model(config['model_name'], device, config['max_seq_length'])
+    model = init_model(config['model_name'], device, config['max_seq_length'], pool_type=config['pooler'])
 
     # 准备数据
     train_samples = prepare_datasets(os.path.join(data_dir, config['data_type']+'.'+config['train_dataset']),
