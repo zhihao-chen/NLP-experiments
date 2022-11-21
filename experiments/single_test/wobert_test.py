@@ -14,7 +14,7 @@ from nlp.utils.wobert_tokenization import WoBertTokenizer
 
 
 texts = [
-    "今天[MASK]很好，我[MASK]去公园玩。"
+    "今天[MASK]很好，我[MASK]去公园玩。",
     ]
 
 pretrained_model_or_path_list = [
@@ -59,7 +59,10 @@ print("****"*10)
 
 roberta_model_list = [
     "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
+    "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext-large",
     "/root/work2/work2/chenzhihao/pretrained_models/macbert-chinese-base",
+    "/root/work2/work2/chenzhihao/pretrained_models/macbert-chinese-large",
+    "/root/work2/work2/chenzhihao/pretrained_models/structbert-large-zh",
     ]
 
 for path in roberta_model_list:
@@ -95,7 +98,7 @@ for path in roberta_model_list:
             output_sent = outputs_sentence + "[MASK]".join(text_list[1:])
         print(output_sent)
 
-
+print("*******"*10)
 roformer_model_name = "junnyu/roformer_v2_chinese_char_base"
 tokenizer = BertTokenizer.from_pretrained(roformer_model_name)
 model = RoFormerForMaskedLM.from_pretrained(roformer_model_name)
