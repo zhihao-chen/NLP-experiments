@@ -129,6 +129,7 @@ def collate_fn(batch_data):
         pos_max_len = max(pos_max_len, len(d['pos_input_ids']))
         if num_sent == 3:
             neg_max_len = max(neg_max_len, len(d['neg_input_ids']))
+    max_len = max(anchor_max_len, pos_max_len, neg_max_len)
     idx_lst = []
     anchor_input_ids_lst = []
     pos_input_ids_lst = []
@@ -139,13 +140,13 @@ def collate_fn(batch_data):
     label_lst = []
     for item in batch_data:
         idx_lst.append(item['idx'])
-        anchor_input_ids_lst.append(pad_to_maxlen(item['anchor_input_ids'], max_len=anchor_max_len))
-        pos_input_ids_lst.append(pad_to_maxlen(item['pos_input_ids'], max_len=pos_max_len))
-        anchor_attention_mask_lst.append(pad_to_maxlen(item['anchor_attention_mask'], max_len=anchor_max_len))
-        pos_attention_mask_lst.append(pad_to_maxlen(item['pos_attention_mask'], max_len=pos_max_len))
+        anchor_input_ids_lst.append(pad_to_maxlen(item['anchor_input_ids'], max_len=max_len))
+        pos_input_ids_lst.append(pad_to_maxlen(item['pos_input_ids'], max_len=max_len))
+        anchor_attention_mask_lst.append(pad_to_maxlen(item['anchor_attention_mask'], max_len=max_len))
+        pos_attention_mask_lst.append(pad_to_maxlen(item['pos_attention_mask'], max_len=max_len))
         if neg_max_len > 0:
-            neg_input_ids_lst.append(pad_to_maxlen(item['neg_input_ids'], max_len=neg_max_len))
-            neg_attention_mask_lst.append(pad_to_maxlen(item['neg_attention_mask'], max_len=neg_max_len))
+            neg_input_ids_lst.append(pad_to_maxlen(item['neg_input_ids'], max_len=max_len))
+            neg_attention_mask_lst.append(pad_to_maxlen(item['neg_attention_mask'], max_len=max_len))
         if item['label'] is not None:
             label_lst.append(item['label'])
 
@@ -214,14 +215,6 @@ class VaSCLDataset(Dataset):
 
         feat1 = self.get_batch_token(text1)
         feat2 = self.get_batch_token(text2)
-        # if label is None:
-        #     input_ids = torch.cat([feat1['input_ids'].unsqueeze(1), feat2['input_ids'].unsqueeze(1)], dim=1)
-        #     attention_mask = torch.cat([feat1['attention_mask'].unsqueeze(1), feat2['attention_mask'].unsqueeze(1)],
-        #                                dim=1)
-        #     return {
-        #         'input_ids': input_ids.to(self.args.device),
-        #         'attention_mask': attention_mask.to(self.args.device)
-        #     }
         return {
             'pos_inputs': {
                 'input_ids': feat1['input_ids'],

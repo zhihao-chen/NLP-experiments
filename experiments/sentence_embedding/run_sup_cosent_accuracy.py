@@ -3,20 +3,18 @@
 """
 @author: czh
 @email:
-@date: 2022/7/6 11:20
+@date: 2022/11/3 15:22
 """
 import codecs
-# 有监督监督CoSENT
-# https://github.com/shawroad/Semantic-Textual-Similarity-Pytorch/blob/main/CoSENT/run_cosent.py
+# 有监督监督CoSENT, 自动确定阈值，评测准确率
+# https://github.com/bojone/CoSENT/blob/main/accuracy/cosent.py
 import os
 import sys
 
 import numpy as np
 from tqdm import tqdm
-from datetime import datetime
-
+from scipy.optimize import minimize
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from transformers import BertTokenizer, BertConfig, get_scheduler, AdamW, set_seed
 
@@ -140,6 +138,14 @@ def calc_loss(y_true, y_pred, args):
     return torch.logsumexp(y_pred, dim=0)
 
 
+def optimal_threshold(y_true, y_pred):
+    """最优阈值的自动搜索
+    """
+    loss = lambda t: -np.mean((y_true > 0.5) == (y_pred > np.tanh(t)))
+    result = minimize(loss, 1, method='Powell')
+    return np.tanh(result.x), -result.fun
+
+
 def get_sent_id_tensor(s_list, tokenizer):
     input_ids, attention_mask, token_type_ids, labels = [], [], [], []
     max_len = max([len(_)+2 for _ in s_list])   # 这样写不太合适 后期想办法改一下
@@ -186,7 +192,12 @@ def evaluate(test_dataset, model, tokenizer, args):
     sims = (a_vecs * b_vecs).sum(axis=1)
     corrcoef = compute_corrcoef(all_labels, sims)
     pearsonr = compute_pearsonr(all_labels, sims)
-    return corrcoef, pearsonr
+    if args['threshold'] is None:
+        threshold, accuracy = optimal_threshold(all_labels, sims)
+    else:
+        accuracy = np.mean((all_labels > 0.5) == (sims > args['threshold']))
+        threshold = args['threshold']
+    return corrcoef, pearsonr, accuracy, threshold
 
 
 def init_model(model_name_or_path, args, flag='train'):
@@ -256,7 +267,7 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     WANDB, run = init_wandb_writer(project_name='semantic_match',
                                    train_args=train_config,
                                    group_name="nlp",
-                                   experiment_name="sts-b-sup_cosent-roberta-wwm-ext")
+                                   experiment_name="sts-b-sup_cosent_accuracy-roberta-wwm-ext")
 
     # Train!
     print("***** Running training *****")
@@ -271,7 +282,6 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     model.zero_grad()
     global_steps = 0
     best_score = 0.0
-    best_score_pearsonr = 0.0
     best_epoch = 0
     set_seed(args['seed'])
 
@@ -304,21 +314,27 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
                 WANDB.log({'Train/loss': total_loss/epoch_steps})
 
             # if (step + 1) % args['eval_steps'] == 0:
-        corrcoef, pearsonr = evaluate(valid_samples, model, tokenizer, args)
-        WANDB.log({'Evaluation/spearman': corrcoef, 'Evaluation/pearsonr': pearsonr}, step=global_steps)
-        print(f"evaluate results: spearman: {corrcoef}\tpearsonr: {pearsonr}")
-        if corrcoef > best_score:
-            best_score = corrcoef
-            best_score_pearsonr = pearsonr
+        corrcoef, pearsonr, accuracy, threshold = evaluate(valid_samples, model, tokenizer, args)
+        WANDB.log({'Evaluation/arrcuracy': accuracy, 'Evaluation/spearman': corrcoef, 'Evaluation/pearsonr': pearsonr},
+                  step=global_steps)
+        print(f"evaluate results. Accuracy: {accuracy}\tThreshold: {threshold}\t"
+              f"Spearman: {corrcoef}\tPearsonr: {pearsonr}")
+        if accuracy > best_score:
+            best_score = accuracy
+            best_spearman = corrcoef
+            best_pearsonr = pearsonr
+            best_threshold = threshold
             best_epoch = best_epoch
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             output_file = os.path.join(args['model_save_path'], 'best_model.bin')
             torch.save(model_to_save.state_dict(), output_file)
+            loginfo = "best_epoch: {}\tbest accuracy: {}\tbest threshold: {}\tpearsonr: {}\tspearman: {}".format(
+                    best_epoch, best_score, best_threshold, best_pearsonr, best_spearman)
+            print(loginfo)
             with codecs.open(os.path.join(args['model_save_path'], "eval_result.txt"), "w", encoding="utf8") as fw:
-                fw.write("best_epoch: {}\tpearsonr: {}\tspearman: {}".format(best_epoch,
-                                                                             best_score_pearsonr,
-                                                                             best_score))
+                fw.write("best_epoch: {}\nbest accuracy: {}\nbest threshold: {}\npearsonr: {}\nspearman: {}".format(
+                    best_epoch, best_score, best_threshold, best_pearsonr, best_spearman))
 
 
 def main():
@@ -327,8 +343,8 @@ def main():
         'model_type': "roberta-wwm-ext",
         'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'output_dir': root_path + "/experiments/output_file_dir/semantic_match",
-        'config_path': None,
-        'tokenizer_path': None,
+        'config_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
+        'tokenizer_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'do_train': True,
         'do_test': True,
         'lr_rate': 2e-5,
@@ -343,6 +359,7 @@ def main():
         'num_train_epochs': 30,
         'max_seq_length': 128,
         'eval_steps': 500,
+        'threshold': None,  # 可以指定[0,1]之间的数
         'object_type': "classification",  # classification, regression, triplet
         'task_type': "match",  # "match" or "nli"
         'pooling_strategy': "cls",  # first-last-avg, last-avg, cls, pooler
@@ -389,11 +406,15 @@ def main():
         model = init_model(config['model_save_path'], args=config, flag="test")
         model.to(device)
 
-        corrcoef, pearsonr = evaluate(test_samples, model, tokenizer, config)
-        print(f"test results: spearman: {corrcoef}\tpearsonr: {pearsonr}")
+        corrcoef, pearsonr, accuracy, threshold = evaluate(test_samples, model, tokenizer, config)
+        loginfo = "Test result. accuracy: {}\tthreshold: {}\tpearsonr: {}\tspearman: {}".format(
+            accuracy, threshold, pearsonr, corrcoef)
+        print(loginfo)
         with codecs.open(os.path.join(model_save_path, 'test_result.txt'), "w", encoding="utf8") as fw:
-            fw.write("pearsonr: {}\tspearman: {}".format(pearsonr, corrcoef))
+            fw.write("Test result. accuracy: {}\nthreshold: {}\npearsonr: {}\nspearman: {}".format(
+                accuracy, threshold, pearsonr, corrcoef))
 
 
 if __name__ == "__main__":
     main()
+

@@ -3,11 +3,10 @@
 """
 @author: czh
 @email:
-@date: 2022/10/19 10:38
+@date: 2022/11/11 17:36
 """
-# 基于VaSCL模型的无监督语义向量训练, 还没实验成功，loss没收敛
-# https://github.com/amazon-research/sentence-representations/blob/main/VaSCL/main.py
-
+# 实验PairSupCon方法
+# https://github.com/amazon-science/sentence-representations/tree/main/PairSupCon
 import os
 import sys
 import logging
@@ -20,16 +19,15 @@ import argparse
 
 import numpy as np
 import torch
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
+import torch.nn as nn
 from torch.utils.data import DataLoader
-from transformers import AutoConfig, AutoTokenizer, set_seed, get_scheduler
-from sklearn.metrics.pairwise import paired_cosine_distances
+from transformers import BertConfig, AutoTokenizer, set_seed, get_scheduler
 
 from nlp.tools.common import init_wandb_writer
-from nlp.models.sentence_embedding_models import VaSCLBERT, VaSCLRoBERTa
-from nlp.processors.semantic_match_preprocessor import load_data, VaSCLDataset
-from nlp.losses.loss import VaSCLContrastiveLoss, VaSCLNBiDir, VaSCLNUniDir
-from nlp.utils.vat_utils import VaSCLPturb
+from nlp.models.sentence_embedding_models import PairSupConBert
+from nlp.processors.semantic_match_preprocessor import load_data, SentDataSet, collate_fn
+from nlp.losses.loss import HardConLoss
 from nlp.metrics.sematic_match_metric import compute_corrcoef, compute_pearsonr, l2_normalize
 
 logger = logging.getLogger(__name__)
@@ -53,9 +51,9 @@ def get_args():
     parser.add_argument("--experiment_name", type=str, default=None)
 
     # Dataset
+    parser.add_argument('--num_labels', type=int, default=2)
     parser.add_argument('--data_dir', default=None, type=str)
-    parser.add_argument('--data_type', default='STS-B', type=str,
-                        choices=["ATEC", "BQ", "LCQMC", "PAWSX", "STS-B", "SNLI"])
+    parser.add_argument('--data_type', default='STS-B', type=str)
     parser.add_argument('--object_type', default='classifier', type=str,
                         choices=["classifier", "regression", "triplet", "multi_neg_rank"])
     parser.add_argument('--train_dataset', default="train.data", type=str)
@@ -79,77 +77,76 @@ def get_args():
     parser.add_argument('--num_train_epochs', type=int, default=5)
     parser.add_argument('--valid_steps', type=int, default=1000)
     parser.add_argument('--max_iter', type=int, default=100000000)
-    # VaSCL loss
+    # Contrastive learning
+    parser.add_argument('--task_type', default=None, type=str,
+                        choices=["classification", "contrastive", "pairsupcon"])
     parser.add_argument('--temperature', type=float, default=0.05, help="temperature required by contrastive loss")
-    parser.add_argument('--topk', type=int, default=16, help=" ")
-    parser.add_argument('--eps', type=float, default=15, help=" ")
+    parser.add_argument('--contrast_type', type=str, default="HardNeg")
+    parser.add_argument('--feat_dim', type=int, default=128,
+                        help="dimension of the projected features for instance discrimination loss")
+    parser.add_argument('--beta', type=float, default=1, help=" ")
 
     args = parser.parse_args()
     args.use_gpu = args.gpuid >= 0
     return args
 
 
-def prepare_datas(args, data_dir, need_label=True, seg_tag='\t'):
-    datas = load_data(data_dir, seg_tag=seg_tag)
-    samples = []
-    for data in datas:
-        if args.data_type == "STS-B":
-            label = data[2] / 5.0
-        else:
-            label = data[2] if args.object_type == "classification" else float(data[2])
-        if need_label:
-            samples.append([data[0].strip(), data[1].strip(), label])
-        else:
-            samples.append([data[0].strip()])
-            samples.append([data[1].strip()])
-
-    np.random.shuffle(samples)
-    return samples
+def prepare_datasets(data_dir, object_type="classification", seg_tag='\t'):
+    dataset = load_data(data_dir, seg_tag=seg_tag)
+    data_samples = []
+    for data in dataset:
+        label = data[2] if object_type == "classification" else float(data[2])
+        data_samples.append([data[0], data[1], label])
+    return data_samples
 
 
-def get_bert_config_tokenizer(args):
-    config = AutoConfig.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path)
-    return config, tokenizer
+def init_model(model_path, num_labels, args, flag='train'):
+    bert_config = BertConfig.from_pretrained(args.config_name if args.config_name else model_path)
+    if flag == 'train':
+        bert_config.save_pretrained(args.model_save_path)
+        model = PairSupConBert(bert_name_or_path=model_path, num_labels=num_labels)
+    else:
+        model = PairSupConBert(config=bert_config, num_labels=num_labels)
+        model.load_state_dict(torch.load(os.path.join(args.output_dir, 'pytorch_model.bin'), map_location=args.device))
+    return model
 
 
-def init_optimizer(total, parameters, args):
-    optimizer = Adam(parameters, lr=args.lr_rate)
+def init_optimizer(total, model: PairSupConBert, args):
+    if args.task_type == "contrastive":
+        optimizer = torch.optim.Adam([
+            {'params': model.bert.parameters()},
+            {'params': model.contrast_head.parameters(), 'lr': args.lr_rate * args.lr_scale}], lr=args.lr_rate)
+    elif args.task_type == "classification":
+        optimizer = torch.optim.Adam([
+            {'params': model.bert.parameters()},
+            {'params': model.classify_head.parameters(), 'lr': args.lr_rate * args.lr_scale}], lr=args.lr_rate)
+    elif args.task_type == "pairsupcon":
+        optimizer = torch.optim.Adam([
+            {'params': model.bert.parameters()},
+            {'params': model.classify_head.parameters(), 'lr': args.lr_rate * args.lr_scale},
+            {'params': model.contrast_head.parameters(), 'lr': args.lr_rate * args.lr_scale}], lr=args.lr_rate)
+    # optimizer = Adam(model.parameters(), lr=args.lr_rate, eps=args.adam_epsilon)
     scheduler = get_scheduler(args.scheduler_type, optimizer=optimizer,
                               num_warmup_steps=args.warmup_steps,
                               num_training_steps=total)
-    # Check if saved optimizer or scheduler states exist
-    if os.path.isfile(os.path.join(args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
-            os.path.join(args.model_name_or_path, "scheduler.pt")):
-        # Load in optimizer and scheduler states
-        optimizer.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
-        scheduler.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "scheduler.pt")))
 
     return optimizer, scheduler
 
 
-def get_parameters(args, model):
-    optimizer_grouped_parameters = [
-        {'params': model.bert.parameters()},
-        {'params': model.contrast_head.parameters(), 'lr': args.lr_rate * args.lr_scale}
-    ]
-    return optimizer_grouped_parameters
-
-
-def evaluate(dataloader, model):
+def evaluate(dataloader, model, args):
     model.eval()
     all_pos_vectors = []
     all_neg_vectors = []
     all_labels = []
 
     for step, batch in enumerate(tqdm(dataloader, desc="Evaluation")):
-        pos_inputs = batch['pos_inputs']
-        neg_inputs = batch['neg_inputs']
-        label_id = batch['label']
+        anchor_input_ids = batch['anchor_input_ids'].to(args.device)
+        pos_input_ids = batch['pos_input_ids'].to(args.device)
+        label_id = batch['label'].detach().cpu().numpy()
 
         with torch.no_grad():
-            pos_embedding = model.encode(**pos_inputs)
-            neg_embedding = model.encode(**neg_inputs)
+            pos_embedding = model.encode(anchor_input_ids)
+            neg_embedding = model.encode(pos_input_ids)
 
             pos_embedding = pos_embedding.detach().cpu().numpy()
             neg_embedding = neg_embedding.detach().cpu().numpy()
@@ -160,13 +157,10 @@ def evaluate(dataloader, model):
     all_pos_vectors = np.array(all_pos_vectors)
     all_neg_vectors = np.array(all_neg_vectors)
     all_labels = np.array(all_labels)
-
     a_vecs = l2_normalize(all_pos_vectors)
     b_vecs = l2_normalize(all_neg_vectors)
 
     cosine_scores = (a_vecs * b_vecs).sum(axis=1)
-    # cosine_scores = 1 - (paired_cosine_distances(all_pos_vectors, all_neg_vectors))
-
     corrcoef = compute_corrcoef(all_labels, cosine_scores)
     pearsonr = compute_pearsonr(all_labels, cosine_scores)
     return corrcoef, pearsonr
@@ -174,21 +168,22 @@ def evaluate(dataloader, model):
 
 def train(args, train_samples, valid_samples, model, tokenizer):
     train_batch_size = args.train_batch_size
-    train_dataset = VaSCLDataset(dataset=train_samples, tokenizer=tokenizer, args=args)
+    train_dataset = SentDataSet(dataset=train_samples, tokenizer=tokenizer, max_seq_length=args.max_seq_length,
+                                task_type='match')
     train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True,
-                                  num_workers=args.num_worker, collate_fn=train_dataset.collate_fn)
+                                  num_workers=args.num_worker, collate_fn=collate_fn)
 
-    valid_dataset = VaSCLDataset(dataset=valid_samples, tokenizer=tokenizer, args=args)
+    valid_dataset = SentDataSet(dataset=valid_samples, tokenizer=tokenizer, max_seq_length=args.max_seq_length,
+                                task_type='match')
     valid_dataloader = DataLoader(valid_dataset, batch_size=args.valid_batch_size, shuffle=False,
-                                  num_workers=args.num_worker, collate_fn=valid_dataset.collate_fn)
+                                  num_workers=args.num_worker, collate_fn=collate_fn)
 
     t_total = len(train_samples) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
-    optimizer_grouped_parameters = get_parameters(args, model)
     warmup_steps = int(t_total * args.warmup_ratio)
     args.warmup_steps = warmup_steps
-    optimizer, scheduler = init_optimizer(t_total, optimizer_grouped_parameters, args)
+    optimizer, scheduler = init_optimizer(t_total, model, args)
 
     train_config = {
         'lr_rate': args.lr_rate,
@@ -206,52 +201,76 @@ def train(args, train_samples, valid_samples, model, tokenizer):
         train_args=train_config
     )
     wandb_tacker.watch(model, 'all')
-
-    paircon_loss = VaSCLContrastiveLoss(temperature=args.temperature, topk=args.topk).to(args.device)
-    uni_criterion = VaSCLNUniDir(temperature=args.temperature).to(args.device)
-    bi_criterion = VaSCLNBiDir(temperature=args.temperature).to(args.device)
-    perturb_embed = VaSCLPturb(xi=args.eps, eps=args.eps, uni_criterion=uni_criterion,
-                               bi_criterion=bi_criterion).to(args.device)
+    # Pairwise classificaiton loss
+    mle_loss_func = nn.CrossEntropyLoss().to(args.device)
+    # Hard negative sampling based instance-discrimination loss
+    inst_disc_loss_func = HardConLoss(temperature=args.temperature, contrast_type=args.contrast_type).to(args.device)
 
     global_steps = 0
     best_score = -float('inf')
     best_epoch = 0
+    patience = 0
     for epoch in range(args.num_train_epochs):
         model.train()
         total_loss = 0.0
+        epoch_steps = 0
         for step, batch in enumerate(tqdm(train_dataloader, desc=f"training on epoch {epoch}/{args.num_train_epochs}")):
-            embeddings, hard_indices, feat1, feat2 = model(**batch, topk=args.topk)
-            losses = paircon_loss(feat1, feat2)
-            loss = losses['loss']
-            losses['vcl_loss'] = loss.item()
-            if args.eps > 0:
-                lds_losses = perturb_embed(model, embeddings.detach(), hard_indices)
-                losses.update(lds_losses)
-                loss += lds_losses["lds_loss"]
-                losses['optimized_loss'] = loss
+            inputs = {
+                'premise_input_ids': batch['anchor_input_ids'].to(args.device),
+                'hypothesis_input_ids': batch['pos_input_ids'].to(args.device),
+                'task_type': args.task_type
+            }
+            label = batch['label'].to(args.device)
+            if args.task_type == 'classification':
+                classify_pred = model(**inputs)
+                loss = mle_loss_func(classify_pred, label)
+                losses = {"classification_loss": loss}
+            elif args.task_type == 'contrastive':
+                feat1, feat2 = model(**inputs)
+                losses = inst_disc_loss_func(feat1, feat2, label)
+                loss = losses['instdisc_loss']
+            elif args.task_type == "pairsupcon":
+                classify_pred, feat1, feat2 = model(**inputs)
+                classify_loss = mle_loss_func(classify_pred, label)
+
+                losses = inst_disc_loss_func(feat1, feat2, label)
+                loss = args.beta * losses["instdisc_loss"]
+
+                loss += classify_loss
+                losses["classification_loss"] = classify_loss
+                losses["loss"] = loss
+            else:
+                raise Exception("Please specify the loss type!")
             loss.backward()
 
-            wandb_tacker.log({'Train/loss': losses}, step=global_steps)
             total_loss += loss.item()
+            epoch_steps += 1
 
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 optimizer.step()
-                # scheduler.step()
+                scheduler.step()
                 optimizer.zero_grad()
                 global_steps += 1
 
-        corrcoef, pearsonr = evaluate(valid_dataloader, model)
-        wandb_tacker.log({'Eval/corrcoef': corrcoef, 'Eval/pearsonr': pearsonr}, step=global_steps)
+            wandb_tacker.log({'Train/loss': losses,
+                              'Train/total_loss': total_loss/epoch_steps}, step=global_steps)
+        corrcoef, pearsonr = evaluate(valid_dataloader, model, args)
+        wandb_tacker.log({'Eval/spearman': corrcoef, 'Eval/pearsonr': pearsonr, 'epoch': epoch}, step=global_steps)
         logger.info(f"evaluate results at epoch {epoch}/{args.num_train_epochs}:"
-                    f" corrcoef: {corrcoef}\tpearsonr: {pearsonr}")
+                    f" spearman: {corrcoef}\tpearsonr: {pearsonr}")
         if corrcoef > best_score:
             best_score = corrcoef
             best_epoch = best_epoch
+            patience = 0
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             output_file = args.model_save_path
-            model_to_save.save_pretrained(output_file)
+            torch.save(model_to_save.state_dict(), os.path.join(output_file, 'pytorch_model.bin'))
             tokenizer.save_pretrained(output_file)
+        else:
+            patience += 1
+            if patience > 5:
+                break
     return best_score, best_epoch
 
 
@@ -269,7 +288,7 @@ def main():
     data_dir = os.path.join(args.data_dir, args.data_type)
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
-    model_save_path = f"{args.output_dir}/{args.data_type}-unsup_vascl-{args.model_type}"
+    model_save_path = f"{args.output_dir}/{args.data_type}-pairsupcon-{args.model_type}"
     args.model_save_path = model_save_path
     if not os.path.exists(model_save_path):
         os.makedirs(model_save_path)
@@ -278,39 +297,28 @@ def main():
     args.device = device
 
     logger.info("******** load datasets *********")
-    train_samples = prepare_datas(args,
-                                  os.path.join(data_dir, args.data_type + '.' + args.train_dataset),
-                                  need_label=False)
-    valid_samples = prepare_datas(args,
-                                  os.path.join(data_dir, args.data_type + '.' + args.valid_dataset),
-                                  need_label=True)
-    test_samples = prepare_datas(args,
-                                 os.path.join(data_dir, args.data_type + '.' + args.test_dataset),
-                                 need_label=True)
+    train_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.' + args.train_dataset))
+    valid_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.' + args.valid_dataset))
 
     logger.info("********* load model ***********")
-    config, tokenizer = get_bert_config_tokenizer(args)
-    if args.model_type == 'roberta':
-        model = VaSCLRoBERTa.from_pretrained(args.model_name_or_path)
-    else:
-        model = VaSCLBERT.from_pretrained(args.model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path)
+    model = init_model(args.model_name_or_path, args.num_labels, args)
     model.to(device)
 
     if args.do_train:
         best_score, best_epoch = train(args, train_samples, valid_samples, model, tokenizer)
         logger.info(f"best score: {best_score}\tbest epoch: {best_epoch}")
     if args.do_test:
-        test_dataset = VaSCLDataset(dataset=test_samples, tokenizer=tokenizer, args=args)
+        test_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.' + args.test_dataset))
+        test_dataset = SentDataSet(dataset=test_samples, tokenizer=tokenizer, max_seq_length=args.max_seq_length,
+                                   task_type='match')
         test_dataloader = DataLoader(test_dataset, batch_size=args.valid_batch_size,
-                                     shuffle=False, num_workers=args.num_worker)
-        if args.model_type == 'roberta':
-            model = VaSCLRoBERTa.from_pretrained(model_save_path)
-        else:
-            model = VaSCLBERT.from_pretrained(model_save_path)
+                                     shuffle=False, num_workers=args.num_worker, collate_fn=collate_fn)
+        model = init_model(model_save_path, num_labels=args.num_labels, args=args)
         model.to(device)
-        corrcoef, pearsonr = evaluate(test_dataloader, model)
+        corrcoef, pearsonr = evaluate(test_dataloader, model, args)
         print(f"Result on test dataset. spearman: {corrcoef}\tpearsonr: {pearsonr}")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

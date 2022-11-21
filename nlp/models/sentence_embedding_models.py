@@ -19,6 +19,7 @@ from sentence_transformers import SentenceTransformer
 from sentence_transformers.util import batch_to_device
 
 from nlp.metrics.triplet_distance_metric import cosin, euclidean, manhattan
+from nlp.utils.util import weighted_sum, masked_softmax
 
 
 class Pooler(nn.Module):
@@ -105,6 +106,64 @@ def cl_init(cls, config):
         cls.mlp = MLPLayer(config)
     cls.sim = Similarity(temp=cls.model_args.temp)
     cls.init_weights()
+
+
+class SoftmaxAttention(nn.Module):
+    """
+    Attention layer taking premises and hypotheses encoded by an RNN as input
+    and computing the soft attention between their elements.
+    The dot product of the encoded vectors in the premises and hypotheses is
+    first computed. The softmax of the result is then used in a weighted sum
+    of the vectors of the premises for each element of the hypotheses, and
+    conversely for the elements of the premises.
+    """
+
+    def forward(self,
+                premise_batch,
+                premise_mask,
+                hypothesis_batch,
+                hypothesis_mask):
+        """
+        Args:
+            premise_batch: A batch of sequences of vectors representing the
+                premises in some NLI task. The batch is assumed to have the
+                size (batch, sequences, vector_dim).
+            premise_mask: A mask for the sequences in the premise batch, to
+                ignore padding data in the sequences during the computation of
+                the attention.
+            hypothesis_batch: A batch of sequences of vectors representing the
+                hypotheses in some NLI task. The batch is assumed to have the
+                size (batch, sequences, vector_dim).
+            hypothesis_mask: A mask for the sequences in the hypotheses batch,
+                to ignore padding data in the sequences during the computation
+                of the attention.
+        Returns:
+            attended_premises: The sequences of attention vectors for the
+                premises in the input batch.
+            attended_hypotheses: The sequences of attention vectors for the
+                hypotheses in the input batch.
+        """
+        # Dot product between premises and hypotheses in each sequence of
+        # the batch.
+        similarity_matrix = premise_batch.bmm(hypothesis_batch.transpose(2, 1)
+                                                              .contiguous())
+
+        # Softmax attention weights.
+        prem_hyp_attn = masked_softmax(similarity_matrix, hypothesis_mask)
+        hyp_prem_attn = masked_softmax(similarity_matrix.transpose(1, 2)
+                                                        .contiguous(),
+                                       premise_mask)
+
+        # Weighted sums of the hypotheses for the the premises attention,
+        # and vice-versa for the attention of the hypotheses.
+        attended_premises = weighted_sum(hypothesis_batch,
+                                         prem_hyp_attn,
+                                         premise_mask)
+        attended_hypotheses = weighted_sum(premise_batch,
+                                           hyp_prem_attn,
+                                           hypothesis_mask)
+
+        return attended_premises, attended_hypotheses
 
 
 class SBERTModel(nn.Module):
@@ -212,6 +271,181 @@ class SBERTModel(nn.Module):
         attention_mask = torch.ne(input_ids, 0)
         output = self.bert(input_ids, attention_mask, output_hidden_states=True)
         embedding = self.get_embedding(output, pooling_strategy)
+        return embedding
+
+
+class PairSupConForSBERT(nn.Module):
+    """
+    清华的PairSCL用于sentence_bert架构中
+    参考:https://github.com/THU-BPM/PairSCL/blob/main/bert_model.py
+    """
+    def __init__(self,
+                 bert_model_path=None,
+                 num_labels=None,
+                 bert_config=None
+                 ):
+        super(PairSupConForSBERT, self).__init__()
+        if bert_model_path:
+            self.bert = BertModel.from_pretrained(bert_model_path)
+        else:
+            self.bert = BertModel(bert_config)
+        self.num_labels = num_labels
+        self.bert_config = bert_config if bert_config is not None else self.bert.config
+        self.dim_mlp = self.bert_config.hidden_size
+        self.softmax_attention = SoftmaxAttention()
+        self.dropout = nn.Dropout(self.bert.config.hidden_dropout_prob)
+        self.projection = nn.Sequential(
+            nn.Linear(4*self.dim_mlp, self.dim_mlp),
+            nn.ReLU())
+        self.pooler = nn.Sequential(nn.Linear(4 * self.dim_mlp, self.dim_mlp),
+                                    self.bert.pooler)
+        self.head = nn.Sequential(nn.Linear(self.dim_mlp, self.dim_mlp),
+                                  nn.ReLU(inplace=True))
+        self.fc_sup = nn.Linear(self.dim_mlp, 128)
+        self.fc_ce = nn.Linear(self.dim_mlp, num_labels)
+
+    def forward(self, anchor_input_ids, pos_input_ids, pooling_strategy='cls'):
+        anchor_attention_mask = torch.ne(anchor_input_ids, 0)
+        pos_attention_mask = torch.ne(pos_input_ids, 0)
+        # [bs, seq_len, dim]
+        anchor_embed = self.bert(anchor_input_ids, anchor_attention_mask, output_hidden_states=True)[0]
+        # [bs, seq_len, dim]
+        pos_embed = self.bert(pos_input_ids, pos_attention_mask, output_hidden_states=True)[0]
+
+        # [bs, seq_len, dim]
+        attended_anchor, attended_pos = self.softmax_attention(anchor_embed,
+                                                               anchor_attention_mask,
+                                                               pos_embed,
+                                                               pos_attention_mask)
+        # [bs, seq_len, 4*dim]
+        enhanced_anchor = torch.cat([anchor_embed,
+                                     attended_anchor,
+                                     anchor_embed - attended_anchor,
+                                     anchor_embed * attended_anchor], dim=-1)
+        enhanced_pos = torch.cat([pos_embed,
+                                  attended_pos,
+                                  pos_embed - attended_pos,
+                                  pos_embed * attended_pos], dim=-1)
+        assert enhanced_anchor.size(2) == 4*self.dim_mlp, f"{enhanced_anchor.size()}\t{self.dim_mlp}"
+        assert enhanced_pos.size(2) == 4*self.dim_mlp, f"{enhanced_pos.size()}\t{self.dim_mlp}"
+
+        projected_anchor = self.projection(enhanced_anchor)
+        projected_pos = self.projection(enhanced_pos)
+        pair_embeds = torch.cat([projected_anchor,
+                                 projected_pos,
+                                 projected_anchor-projected_pos,
+                                 projected_anchor*projected_pos], dim=-1)
+        pair_output = self.pooler(pair_embeds)
+        feat = self.head(pair_output)
+        ce_feature = nnf.normalize(self.fc_ce(feat), dim=-1)
+        scl_feature = nnf.normalize(self.fc_sup(feat), dim=-1)
+        return ce_feature, scl_feature
+
+    @staticmethod
+    def get_embedding(output, pooling_strategy):
+        if pooling_strategy == 'first-last-avg':
+            # 第一层和最后一层的隐层取出  然后经过平均池化
+            # hidden_states列表有13个hidden_state，第一个其实是embeddings，第二个元素才是第一层的hidden_state
+            first = output.hidden_states[1]
+            last = output.hidden_states[-1]
+            seq_length = first.size(1)  # 序列长度
+
+            first_avg = torch.avg_pool1d(first.transpose(1, 2), kernel_size=seq_length).squeeze(-1)  # batch, hid_size
+            last_avg = torch.avg_pool1d(last.transpose(1, 2), kernel_size=seq_length).squeeze(-1)  # batch, hid_size
+            final_encoding = torch.cat([first_avg.unsqueeze(1), last_avg.unsqueeze(1)], dim=1).transpose(1, 2)
+            final_encoding = torch.avg_pool1d(final_encoding, kernel_size=2).squeeze(-1)
+            return final_encoding
+
+        elif pooling_strategy == 'last-avg':
+            sequence_output = output.last_hidden_state  # (batch_size, max_len, hidden_size)
+            seq_length = sequence_output.size(1)
+            final_encoding = torch.avg_pool1d(sequence_output.transpose(1, 2), kernel_size=seq_length).squeeze(-1)
+            return final_encoding
+
+        elif pooling_strategy == "cls":
+            sequence_output = output.last_hidden_state
+            cls = sequence_output[:, 0]  # [b,d]
+            return cls
+
+        elif pooling_strategy == "pooler":
+            pooler_output = output.pooler_output  # [b,d]
+            return pooler_output
+        else:
+            raise ValueError("'pooling_strategy' must one of [first-last-avg, last-avg, cls, pooler]")
+
+    def encode(self, input_ids, pooling_strategy='cls'):
+        attention_mask = torch.ne(input_ids, 0)
+        output = self.bert(input_ids, attention_mask, output_hidden_states=True)
+        embedding = self.get_embedding(output, pooling_strategy=pooling_strategy)
+        return embedding
+
+
+class PairSupConBert(nn.Module):
+    """
+    参考：https://github.com/amazon-science/sentence-representations/blob/main/PairSupCon/models/Transformers.py
+    """
+    def __init__(self, bert_name_or_path=None, config=None, num_labels=2, feat_dim=128):
+        super(PairSupConBert, self).__init__()
+        if bert_name_or_path is not None:
+            self.bert = BertModel.from_pretrained(bert_name_or_path)
+        elif config is not None:
+            self.bert = BertModel(config)
+        else:
+            raise ValueError("The argument of [bert_name_or_path] or [config] not be empty")
+        self.emb_size = self.bert.config.hidden_size
+        self.num_classes = num_labels
+        self.feat_dim = feat_dim
+
+        # Sentence-Bert style input for training the pairwise classification head
+        self.classify_head = nn.Linear(3 * self.emb_size, self.num_classes)
+
+        self.contrast_head = nn.Sequential(
+            nn.Linear(self.emb_size, self.emb_size),
+            nn.ReLU(inplace=True),
+            nn.Linear(self.emb_size, self.feat_dim))
+
+    def forward(self, premise_input_ids, hypothesis_input_ids, task_type):
+        premise_attention_mask = torch.ne(premise_input_ids, 0)
+        hypothesis_attention_mask = torch.ne(hypothesis_input_ids, 0)
+        # get the mean embeddings
+        bert_output_1 = self.bert.forward(premise_input_ids, premise_attention_mask, output_hidden_states=True)
+        bert_output_2 = self.bert.forward(hypothesis_input_ids, hypothesis_attention_mask, output_hidden_states=True)
+
+        mean_output_1 = self.get_mean_embeddings(bert_output_1)  # [bs, hidden_size]
+        mean_output_2 = self.get_mean_embeddings(bert_output_2)  # [bs, hidden_size]
+
+        if task_type == "classification":
+            class_pred = self.classify_pred(mean_output_1, mean_output_2)
+            return class_pred
+        elif task_type == "contrastive":
+            cnst_feat1, cnst_feat2 = self.contrast_logits(mean_output_1, mean_output_2)
+            return cnst_feat1, cnst_feat2
+        else:
+            # PairSupCon Objective
+            class_pred = self.classify_pred(mean_output_1, mean_output_2)
+            cnst_feat1, cnst_feat2 = self.contrast_logits(mean_output_1, mean_output_2)
+            return class_pred, cnst_feat1, cnst_feat2
+
+    def contrast_logits(self, embd1, embd2):
+        feat1 = nnf.normalize(self.contrast_head(embd1), dim=1)  # [bs, feat_dim]
+        feat2 = nnf.normalize(self.contrast_head(embd2), dim=1)
+        return feat1, feat2
+
+    def classify_pred(self, embd1, embd2):
+        embeddings = torch.cat([embd1, embd2, torch.abs(embd1 - embd2)], dim=-1)
+        return self.classify_head(embeddings)
+
+    @staticmethod
+    def get_mean_embeddings(output):
+        sequence_output = output.last_hidden_state  # (batch_size, max_len, hidden_size)
+        seq_length = sequence_output.size(1)
+        final_encoding = torch.avg_pool1d(sequence_output.transpose(1, 2), kernel_size=seq_length).squeeze(-1)
+        return final_encoding
+
+    def encode(self, input_ids):
+        attention_mask = torch.ne(input_ids, 0)
+        bert_output = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        embedding = self.get_mean_embeddings(bert_output)
         return embedding
 
 
@@ -807,13 +1041,17 @@ class VaSCLBERT(BertPreTrainedModel):
 
     def forward(self, input_ids, attention_mask, topk=16, task_type="train"):
         if task_type == "evaluate":
-            return self.get_mean_embeddings(input_ids, attention_mask)
+            return self.get_mean_embeddings(input_ids)
         else:
             input_ids_1, input_ids_2 = torch.unbind(input_ids, dim=1)
             attention_mask_1, attention_mask_2 = torch.unbind(attention_mask, dim=1)
 
-            mean_output_1 = self.get_mean_embeddings(input_ids_1, attention_mask_1)
-            mean_output_2 = self.get_mean_embeddings(input_ids_2, attention_mask_2)
+            output_1 = self.bert(input_ids_1, attention_mask_2, output_hidden_states=True)
+            output_2 = self.bert(input_ids_2, attention_mask_2, output_hidden_states=True)
+
+            mean_output_1 = self.get_mean_embeddings(output_1)
+            mean_output_2 = self.get_mean_embeddings(output_2)
+
             inner_prod = torch.mm(mean_output_1, mean_output_1.t().contiguous())
 
             # estimate the neighborhood of input example
@@ -825,16 +1063,23 @@ class VaSCLBERT(BertPreTrainedModel):
             cnst_feat1, cnst_feat2 = self.contrast_logits(mean_output_1, mean_output_2)
             return mean_output_1, hard_indices_unidir, cnst_feat1, cnst_feat2
 
-    def get_mean_embeddings(self, input_ids, attention_mask):
-        bert_output = self.bert.forward(input_ids=input_ids, attention_mask=attention_mask)
-        attention_mask = attention_mask.unsqueeze(-1)
-        mean_output = torch.sum(bert_output[0] * attention_mask, dim=1) / torch.sum(attention_mask, dim=1)
-        return mean_output
+    @staticmethod
+    def get_mean_embeddings(output):
+        sequence_output = output.last_hidden_state  # (batch_size, max_len, hidden_size)
+        seq_length = sequence_output.size(1)
+        final_encoding = torch.avg_pool1d(sequence_output.transpose(1, 2), kernel_size=seq_length).squeeze(-1)
+        return final_encoding
+
+    def encode(self, input_ids, attention_mask):
+        # attention_mask = torch.ne(input_ids, 0)
+        bert_output = self.bert(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        embedding = self.get_mean_embeddings(bert_output)
+        return embedding
 
     def contrast_logits(self, embd1, embd2=None):
-        feat1 = nnf.normalize(self.contrast_head(embd1), dim=1)
+        feat1 = nnf.normalize(self.contrast_head(embd1), dim=-1)
         if embd2 is not None:
-            feat2 = nnf.normalize(self.contrast_head(embd2), dim=1)
+            feat2 = nnf.normalize(self.contrast_head(embd2), dim=-1)
             return feat1, feat2
         else:
             return feat1

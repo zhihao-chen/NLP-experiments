@@ -295,3 +295,122 @@ class VaSCLNBiDir(nn.Module):
         ng = hardneg.sum(dim=-1)
         loss_pos = (- torch.log(pos / (ng + pos))).mean()
         return {"lds_loss": loss_pos}
+
+
+class HardConLoss(nn.Module):
+    """
+    PairSupCon中的损失函数
+    https://github.com/amazon-science/sentence-representations/blob/main/PairSupCon/utils/contrastive_utils.py
+    """
+    def __init__(self, temperature=0.07, contrast_type="HardNeg"):
+        super(HardConLoss, self).__init__()
+        self.temperature = temperature
+        self.contrast_type = contrast_type
+        self.eps = 1e-08
+
+    def forward(self, features_1, features_2, pairsimi):
+        device = (features_1.device if features_1.is_cuda else torch.device('cpu'))
+        batch_size = features_1.shape[0]
+        assert features_2.shape[0] == batch_size
+        assert pairsimi.shape[0] == batch_size
+        # features_1: [bs, embed_dim]
+        features = torch.cat([features_1, features_2], dim=0)  # [2*bs, embed_dim]
+        mask = torch.eye(batch_size, dtype=torch.bool).to(device)
+        mask = mask.repeat(2, 2)  # [2*bs, 2*bs]
+        mask = ~mask
+
+        pos = torch.exp(torch.sum(features_1 * features_2, dim=-1) / self.temperature)  # [bs]
+        pos = torch.cat([pos, pos], dim=0)  # [2*bs]
+        neg = torch.exp(torch.mm(features, features.t().contiguous()) / self.temperature)  # [2*bs, 2*bs]
+        neg = neg.masked_select(mask).view(2 * batch_size, -1)  # [2*bs, -1]
+
+        pairmask = torch.cat([pairsimi, pairsimi], dim=0)  # [2*bs]
+        posmask = (pairmask == 1).detach()
+        posmask = posmask.type(torch.int32)  # [2*bs, 2*seq_len]
+
+        if self.contrast_type == "Orig":
+            ng = neg.sum(dim=-1)  # [2*bs]
+            loss_pos = (-posmask * torch.log(pos / (ng + pos))).sum() / posmask.sum()
+            return {"instdisc_loss": loss_pos}
+
+        elif self.contrast_type == "HardNeg":
+            negimp = neg.log().exp()
+            ng = (negimp * neg).sum(dim=-1) / negimp.mean(dim=-1)
+            temp = torch.log(pos / (ng + pos))
+            loss_pos = (-posmask * temp).sum() / posmask.sum()
+            return {"instdisc_loss": loss_pos}
+
+        else:
+            raise Exception("Please specify the contrastive loss, Orig vs. HardNeg.")
+
+
+class SupConLoss(nn.Module):
+    """
+    Supervised Contrastive Learning: https://arxiv.org/pdf/2004.11362.pdf.
+    参考自：https://github.com/THU-BPM/PairSCL/blob/d8dc0b65a022a1e71a55c554bdde7a0b91cf747b/losses.py
+    """
+
+    def __init__(self, temperature=0.07, contrast_mode='all',
+                 base_temperature=0.07):
+        super(SupConLoss, self).__init__()
+        self.temperature = temperature
+        self.contrast_mode = contrast_mode
+        self.base_temperature = base_temperature
+
+    def forward(self, features, labels=None, mask=None):
+        """Compute loss for model.
+        Args:
+            features: hidden vector of shape [bsz, ...].
+            labels: ground truth of shape [bsz].
+            mask: contrastive mask of shape [bsz, bsz], mask_{i,j}=1 if sample j
+                has the same class as sample i. Can be asymmetric.
+        Returns:
+            A loss scalar.
+        """
+        device = (features.device
+                  if features.is_cuda
+                  else torch.device('cpu'))
+
+        batch_size = features.shape[0]
+        if labels is not None and mask is not None:
+            raise ValueError('Cannot define both `labels` and `mask`')
+        elif labels is not None:
+            labels = labels.contiguous().view(-1, 1)
+            mask = torch.eq(labels, labels.T).float().to(device)
+        else:
+            mask = mask.float().to(device)
+
+        contrast_feature = features
+        contrast_count = 1
+        anchor_feature = features
+        anchor_count = 1
+
+        # compute logits
+        anchor_dot_contrast = torch.div(
+            torch.matmul(anchor_feature, contrast_feature.T),
+            self.temperature)
+        # for numerical stability
+        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
+        logits = anchor_dot_contrast - logits_max.detach()
+
+        # mask-out self-contrast cases
+        logits_mask = torch.scatter(
+            torch.ones_like(mask),
+            1,
+            torch.arange(batch_size * anchor_count).view(-1, 1).to(device),
+            0
+        )
+        mask = mask * logits_mask
+
+        # compute log_prob
+        exp_logits = torch.exp(logits) * logits_mask
+        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
+
+        # compute mean of log-likelihood over positive
+        mean_log_prob_pos = (mask * log_prob).sum(1) / mask.sum(1)
+
+        # loss
+        loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
+        loss = loss.view(anchor_count, batch_size).mean()
+
+        return loss

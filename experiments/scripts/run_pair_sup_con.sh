@@ -4,12 +4,12 @@ OUTPUT_DIR=$PROJECT_PATH/experiments/output_file_dir/semantic_match
 MODEL_PATH="/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext"
 
 PROJECT_NAME='semantic_match'
-EXPERIMENT_NAME='sts-b-unsup_vascl-roberta-wwm-ext'
+EXPERIMENT_NAME='bq-pairsupcon-roberta-wwm-ext'
 GROUP_NAME='nlp'
 MODEL_TYPE='roberta-wwm-ext'
-DATA_TYPE='STS-B'
+DATA_TYPE='BQ'
 
-python $PROJECT_PATH/experiments/sentence_embedding/run_unsup_vascl.py \
+python $PROJECT_PATH/experiments/sentence_embedding/run_pair_sup_con.py \
   --model_type=$MODEL_TYPE \
   --model_name_or_path=$MODEL_PATH \
   --output_dir=$OUTPUT_DIR \
@@ -22,16 +22,18 @@ python $PROJECT_PATH/experiments/sentence_embedding/run_unsup_vascl.py \
   --do_valid \
   --do_test \
   --max_seq_length=64 \
-  --lr_rate=2e-5 \
-  --lr_scale=1000 \
+  --lr_rate=5e-05 \
+  --lr_scale 100 \
   --gradient_accumulation_steps=1 \
   --scheduler_type='linear' \
   --train_batch_size=256 \
   --valid_batch_size=128 \
-  --num_train_epochs=100 \
-  --gpuid=2 \
+  --num_train_epochs=200 \
+  --gpuid=3 \
   --seed=2333 \
   --num_worker=0 \
+  --num_labels=2 \
   --temperature=0.05 \
-  --topk=16 \
-  --eps=15
+  --task_type='pairsupcon' \
+  --contrast_type="HardNeg" \
+  --beta=1

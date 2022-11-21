@@ -14,7 +14,7 @@ import json
 import os
 # from transformers import BertTokenizer
 # from bert4keras.tokenizers import Tokenizer
-from nlp.tools.official_tokenization import BertTokenizer
+from nlp.utils.official_tokenization import BertTokenizer
 import torch
 import numpy as np
 from random import choice

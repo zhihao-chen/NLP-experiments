@@ -3,12 +3,13 @@
 """
 @author: czh
 @email:
-@date: 2022/6/28 20:04
+@date: 2022/11/4 14:43
 """
-import codecs
+# 有监督sentence bert，评测指标accuracy
 import os
 import sys
 import json
+import codecs
 
 import numpy as np
 from tqdm import tqdm
@@ -17,6 +18,7 @@ from datetime import datetime
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from scipy.optimize import minimize
 from transformers import BertTokenizer, BertConfig, get_scheduler, AdamW, set_seed
 from sklearn.metrics.pairwise import paired_cosine_distances
 
@@ -27,8 +29,6 @@ from nlp.tools.common import init_wandb_writer
 from nlp.models.sentence_embedding_models import SBERTModel
 from nlp.processors.semantic_match_preprocessor import load_data, SentDataSet, collate_fn
 from nlp.metrics.sematic_match_metric import compute_corrcoef, compute_pearsonr, l2_normalize
-from nlp.utils.wobert_tokenization import WoBertTokenizer
-
 
 TRAIN_CONFIG = {
     'lr_rate': 2e-5,
@@ -55,12 +55,11 @@ def prepare_datasets(data_dir, data_type="STS-B", object_type="classification", 
 def init_model(model_path, num_labels, args, flag="train"):
     bert_config = BertConfig.from_pretrained(args['config_path'] if args['config_path'] else model_path)
     if flag == "train":
-        bert_config.save_pretrained(args['model_save_path'])
         model = SBERTModel(bert_model_path=model_path, bert_config=bert_config,
                            num_labels=num_labels, object_type=args['object_type'])
     else:
         model = SBERTModel(bert_config=bert_config, num_labels=num_labels, object_type=args['object_type'])
-        model.load_state_dict(torch.load(model_path+"/best_model.bin", map_location=args['device']))
+        model.load_state_dict(torch.load(model_path + "/best_model.bin", map_location=args['device']))
     return model
 
 
@@ -97,8 +96,15 @@ def get_parameters(model):
     return optimizer_grouped_parameters
 
 
-def evaluate(data_loader, model, args):
+def optimal_threshold(y_true, y_pred):
+    """最优阈值的自动搜索
+    """
+    loss = lambda t: -np.mean((y_true > 0.5) == (y_pred > np.tanh(t)))
+    result = minimize(loss, 1, method='Powell')
+    return np.tanh(result.x), -result.fun
 
+
+def evaluate(data_loader, model, args):
     model.eval()
     all_anchor_vectors = []
     all_pos_vectors = []
@@ -127,12 +133,18 @@ def evaluate(data_loader, model, args):
 
     a_vecs = l2_normalize(all_anchor_vectors)
     b_vecs = l2_normalize(all_pos_vectors)
-
     cosine_scores = (a_vecs * b_vecs).sum(axis=1)
     # cosine_scores = 1 - (paired_cosine_distances(all_anchor_vectors, all_pos_vectors))
     corrcoef = compute_corrcoef(all_labels, cosine_scores)
     pearsonr = compute_pearsonr(all_labels, cosine_scores)
-    return corrcoef, pearsonr
+
+    # 计算accuracy
+    if args['threshold'] is None:
+        threshold, accuracy = optimal_threshold(all_labels, cosine_scores)
+    else:
+        accuracy = np.mean((all_labels > 0.5) == (cosine_scores > args['threshold']))
+        threshold = args['threshold']
+    return corrcoef, pearsonr, accuracy, threshold
 
 
 def train(train_samples, valid_samples, model, tokenizer, args):
@@ -170,14 +182,12 @@ def train(train_samples, valid_samples, model, tokenizer, args):
         loss_func = nn.CosineEmbeddingLoss()
     else:
         loss_func = nn.MarginRankingLoss(margin=args['triplet_margin'])
-
     wandb_tacker, _ = init_wandb_writer(project_name=args['project_name'],
                                         train_args=TRAIN_CONFIG,
                                         group_name=args['group_name'],
                                         experiment_name=args['experiment_name'])
 
     wandb_tacker.watch(model, log='all')
-
     global_steps = 0
     model.to(args['device'])
     model.zero_grad()
@@ -212,39 +222,43 @@ def train(train_samples, valid_samples, model, tokenizer, args):
                 optimizer.zero_grad()
                 global_steps += 1
 
-        corrcoef, pearsonr = evaluate(valid_dataloader, model, args)
-        wandb_tacker.log({'Evaluation': {'spearman': corrcoef, 'pearsonr': pearsonr}}, step=global_steps)
-        print(f"evaluate results. Spearman: {corrcoef}\tPearsonr: {pearsonr}")
-        if corrcoef > best_score:
-            best_score = corrcoef
-            best_epoch = epoch
+        corrcoef, pearsonr, accuracy, threshold = evaluate(valid_dataloader, model, args)
+        wandb_tacker.log({'Evaluation': {'accuracy': accuracy, 'spearman': corrcoef, 'pearsonr': pearsonr}},
+                         step=global_steps)
+        print(f"evaluate results. Accuracy: {accuracy}\tThreshold: {threshold}\t"
+              f"Spearman: {corrcoef}\tPearsonr: {pearsonr}")
+        if accuracy > best_score:
+            best_score = accuracy
+            best_spearman = corrcoef
+            best_pearsonr = pearsonr
+            best_threshold = threshold
+            best_epoch = best_epoch
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             output_file = os.path.join(args['model_save_path'], 'best_model.bin')
             torch.save(model_to_save.state_dict(), output_file)
             tokenizer.save_pretrained(args['model_save_path'])
-
-            loginfo = "best_epoch: {}\tspearman: {}\tpearsonr: {}".format(
-                best_epoch, best_score, pearsonr)
+            loginfo = "best_epoch: {}\tbest accuracy: {}\tbest threshold: {}\tpearsonr: {}\tspearman: {}".format(
+                best_epoch, best_score, best_threshold, best_pearsonr, best_spearman)
             print(loginfo)
             with codecs.open(os.path.join(args['model_save_path'], "eval_result.txt"), "w",
                              encoding="utf8") as fw:
                 fw.write(
-                    "best_epoch: {}\nspearman: {}\npearsonr: {}".format(
-                        best_epoch, best_score, pearsonr))
+                    "best_epoch: {}\nbest accuracy: {}\nbest threshold: {}\npearsonr: {}\nspearman: {}".format(
+                        best_epoch, best_score, best_threshold, best_pearsonr, best_spearman))
 
 
 def main():
     root_path = "/root/work2/work2/chenzhihao/NLP"
     config = {
-        'model_type': "wobert-base",
-        'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese_wobert_base",
+        'model_type': "roberta-wwm-ext",
+        'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'output_dir': root_path + "/experiments/output_file_dir/semantic_match",
-        'config_path': None,
-        'tokenizer_path': None,
+        'config_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
+        'tokenizer_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'do_train': True,
         'do_test': True,
-        'num_labels': 2,  # 注意STS-B的label是6个
+        'num_labels': 6,  # 注意STS-B的label是6个
         'train_batch_size': 64,
         'valid_batch_size': 64,
         'test_batch_size': 64,
@@ -254,16 +268,17 @@ def main():
         'object_type': "classification",  # classification, regression, triplet
         'task_type': "match",  # "match" or "nli"
         'scheduler_type': "linear",
-        'pooling_strategy': "last-avg",  # first-last-avg, last-avg, cls, pooler
+        'pooling_strategy': "first-last-avg",  # first-last-avg, last-avg, cls, pooler
         'distance_type': "",
         'triplet_margin': 0.5,
-        'data_type': "BQ",  # ATEC, BQ, LCQMC, PAWSX, STS-B
+        'threshold': None,
+        'data_type': "STS-B",  # ATEC, BQ, LCQMC, PAWSX, STS-B
         'train_dataset': "train.data",
         'valid_dataset': "valid.data",
         'test_dataset': "test.data",
         'project_name': 'semantic_match',
         'group_name': "nlp",
-        'experiment_name': "BQ_sbert2-wobert-base",
+        'experiment_name': "STS-B_sbert-accuracy-roberta-wwm-ext",
         'cuda_number': "2",
         'num_worker': 4,
         'seed': 2333
@@ -273,7 +288,7 @@ def main():
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
     output_dir = root_path + "/experiments/output_file_dir/semantic_match"
-    model_save_path = output_dir + f"/{config['data_type']}-sbert2-{config['model_type']}-{config['pooling_strategy']}"
+    model_save_path = output_dir + f"/{config['data_type']}-sbert-accuracy-{config['model_type']}-{config['pooling_strategy']}"
     config['model_save_path'] = model_save_path
     if not os.path.exists(model_save_path):
         os.makedirs(model_save_path)
@@ -285,12 +300,9 @@ def main():
                                      config['data_type'], config['object_type'])
     valid_samples = prepare_datasets(os.path.join(data_dir, config['data_type'] + '.' + config['valid_dataset']),
                                      config['data_type'], config['object_type'])
-    if 'wobert' in config['model_type']:
-        tokenizer_class = WoBertTokenizer
-    else:
-        tokenizer_class = BertTokenizer
-    tokenizer = tokenizer_class.from_pretrained(config['model_name_or_path']
-                                                if not config['tokenizer_path'] else config['tokenizer_path'])
+
+    tokenizer = BertTokenizer.from_pretrained(config['model_name_or_path']
+                                              if not config['tokenizer_path'] else config['tokenizer_path'])
     model = init_model(model_path=config['model_name_or_path'], num_labels=config['num_labels'], args=config)
     model.to(device)
 
@@ -305,12 +317,13 @@ def main():
         model = init_model(model_path=config['model_save_path'], num_labels=config['num_labels'],
                            args=config, flag='test')
         model.to(device)
-        corrcoef, pearsonr = evaluate(test_dataloader, model, config)
-        loginfo = "Test result. pearsonr: {}\tspearman: {}".format(
-            pearsonr, corrcoef)
+        corrcoef, pearsonr, accuracy, threshold = evaluate(test_dataloader, model, config)
+        loginfo = "Test result. accuracy: {}\tthreshold: {}\tpearsonr: {}\tspearman: {}".format(
+            accuracy, threshold, pearsonr, corrcoef)
         print(loginfo)
         with codecs.open(os.path.join(model_save_path, 'test_result.txt'), "w", encoding="utf8") as fw:
-            fw.write("Test result. pearsonr: {}\nspearman: {}".format(pearsonr, corrcoef))
+            fw.write("Test result. accuracy: {}\nthreshold: {}\npearsonr: {}\nspearman: {}".format(
+                accuracy, threshold, pearsonr, corrcoef))
 
 
 if __name__ == "__main__":
