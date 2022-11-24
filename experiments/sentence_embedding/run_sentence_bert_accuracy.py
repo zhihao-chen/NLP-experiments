@@ -6,6 +6,7 @@
 @date: 2022/11/4 14:43
 """
 # 有监督sentence bert，评测指标accuracy
+# https://github.com/bojone/CoSENT/blob/main/accuracy/sbert.py
 import os
 import sys
 import json
@@ -31,7 +32,7 @@ from nlp.processors.semantic_match_preprocessor import load_data, SentDataSet, c
 from nlp.metrics.sematic_match_metric import compute_corrcoef, compute_pearsonr, l2_normalize
 
 TRAIN_CONFIG = {
-    'lr_rate': 2e-5,
+    'lr_rate': 5e-06,
     'gradient_accumulation_steps': 1,
     'warmup_ratio': 0.1,
     'adam_epsilon': 1e-8,
@@ -55,6 +56,7 @@ def prepare_datasets(data_dir, data_type="STS-B", object_type="classification", 
 def init_model(model_path, num_labels, args, flag="train"):
     bert_config = BertConfig.from_pretrained(args['config_path'] if args['config_path'] else model_path)
     if flag == "train":
+        bert_config.save_pretrained(args['model_save_path'])
         model = SBERTModel(bert_model_path=model_path, bert_config=bert_config,
                            num_labels=num_labels, object_type=args['object_type'])
     else:
@@ -81,17 +83,11 @@ def init_optimizer(total, parameters, args):
 def get_parameters(model):
     no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]
     bert_param_optimizer = list(model.bert.named_parameters())
-    linear_param_optimizer = list(model.classifier.named_parameters())
     optimizer_grouped_parameters = [
         {'params': [p for n, p in bert_param_optimizer if not any(nd in n for nd in no_decay)],
          'weight_decay': TRAIN_CONFIG["weight_decay"], 'lr': TRAIN_CONFIG['lr_rate']},
         {'params': [p for n, p in bert_param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0,
          'lr': TRAIN_CONFIG['lr_rate']},
-
-        {'params': [p for n, p in linear_param_optimizer if not any(nd in n for nd in no_decay)],
-         'weight_decay': TRAIN_CONFIG["weight_decay"], 'lr': TRAIN_CONFIG['lr_rate']},
-        {'params': [p for n, p in linear_param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0,
-         'lr': TRAIN_CONFIG['lr_rate']}
     ]
     return optimizer_grouped_parameters
 
@@ -179,7 +175,7 @@ def train(train_samples, valid_samples, model, tokenizer, args):
     if args['object_type'] == "classification":
         loss_func = nn.CrossEntropyLoss()
     elif args['object_type'] == "regression":
-        loss_func = nn.CosineEmbeddingLoss()
+        loss_func = nn.MSELoss()
     else:
         loss_func = nn.MarginRankingLoss(margin=args['triplet_margin'])
     wandb_tacker, _ = init_wandb_writer(project_name=args['project_name'],
@@ -232,7 +228,7 @@ def train(train_samples, valid_samples, model, tokenizer, args):
             best_spearman = corrcoef
             best_pearsonr = pearsonr
             best_threshold = threshold
-            best_epoch = best_epoch
+            best_epoch = epoch
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             output_file = os.path.join(args['model_save_path'], 'best_model.bin')
@@ -254,8 +250,8 @@ def main():
         'model_type': "roberta-wwm-ext",
         'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'output_dir': root_path + "/experiments/output_file_dir/semantic_match",
-        'config_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
-        'tokenizer_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
+        'config_path': None,
+        'tokenizer_path': None,
         'do_train': True,
         'do_test': True,
         'num_labels': 6,  # 注意STS-B的label是6个
@@ -268,7 +264,7 @@ def main():
         'object_type': "classification",  # classification, regression, triplet
         'task_type': "match",  # "match" or "nli"
         'scheduler_type': "linear",
-        'pooling_strategy': "first-last-avg",  # first-last-avg, last-avg, cls, pooler
+        'pooling_strategy': "last-avg",  # first-last-avg, last-avg, cls, pooler
         'distance_type': "",
         'triplet_margin': 0.5,
         'threshold': None,

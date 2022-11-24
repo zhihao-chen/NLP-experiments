@@ -249,7 +249,7 @@ class SBERTModel(nn.Module):
 
             logits = self.classifier(concat_vector)
         elif self.object_type == "regression":
-            logits = nnf.cosine_similarity(anchor_embedding, pos_embedding)
+            logits = torch.cosine_similarity(anchor_embedding, pos_embedding)
         elif self.object_type == "triplet":
             if neg_input_ids is not None:
                 neg_attention_mask = torch.ne(neg_input_ids, 0)

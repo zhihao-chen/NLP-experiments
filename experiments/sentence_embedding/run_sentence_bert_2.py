@@ -31,7 +31,7 @@ from nlp.utils.wobert_tokenization import WoBertTokenizer
 
 
 TRAIN_CONFIG = {
-    'lr_rate': 2e-5,
+    'lr_rate': 5e-06,
     'gradient_accumulation_steps': 1,
     'warmup_ratio': 0.1,
     'adam_epsilon': 1e-8,
@@ -44,10 +44,10 @@ def prepare_datasets(data_dir, data_type="STS-B", object_type="classification", 
     dataset = load_data(data_dir, seg_tag=seg_tag)
     data_samples = []
     for data in dataset:
-        # if data_type == "STS-B":
-        #     label = data[2] / 5.0
-        # else:
-        label = data[2] if object_type == "classification" else float(data[2])
+        if data_type == "STS-B":
+            label = data[2] / 5.0
+        else:
+            label = data[2] if object_type == "classification" else float(data[2])
         data_samples.append([data[0], data[1], label])
     return data_samples
 
@@ -81,18 +81,12 @@ def init_optimizer(total, parameters, args):
 
 def get_parameters(model):
     no_decay = ["bias", "LayerNorm.weight", "LayerNorm.bias"]
-    bert_param_optimizer = list(model.bert.named_parameters())
-    linear_param_optimizer = list(model.classifier.named_parameters())
+    bert_param_optimizer = list(model.named_parameters())
     optimizer_grouped_parameters = [
         {'params': [p for n, p in bert_param_optimizer if not any(nd in n for nd in no_decay)],
          'weight_decay': TRAIN_CONFIG["weight_decay"], 'lr': TRAIN_CONFIG['lr_rate']},
         {'params': [p for n, p in bert_param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0,
          'lr': TRAIN_CONFIG['lr_rate']},
-
-        {'params': [p for n, p in linear_param_optimizer if not any(nd in n for nd in no_decay)],
-         'weight_decay': TRAIN_CONFIG["weight_decay"], 'lr': TRAIN_CONFIG['lr_rate']},
-        {'params': [p for n, p in linear_param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0,
-         'lr': TRAIN_CONFIG['lr_rate']}
     ]
     return optimizer_grouped_parameters
 
@@ -127,7 +121,6 @@ def evaluate(data_loader, model, args):
 
     a_vecs = l2_normalize(all_anchor_vectors)
     b_vecs = l2_normalize(all_pos_vectors)
-
     cosine_scores = (a_vecs * b_vecs).sum(axis=1)
     # cosine_scores = 1 - (paired_cosine_distances(all_anchor_vectors, all_pos_vectors))
     corrcoef = compute_corrcoef(all_labels, cosine_scores)
@@ -167,7 +160,7 @@ def train(train_samples, valid_samples, model, tokenizer, args):
     if args['object_type'] == "classification":
         loss_func = nn.CrossEntropyLoss()
     elif args['object_type'] == "regression":
-        loss_func = nn.CosineEmbeddingLoss()
+        loss_func = nn.MSELoss()
     else:
         loss_func = nn.MarginRankingLoss(margin=args['triplet_margin'])
 
@@ -237,8 +230,8 @@ def train(train_samples, valid_samples, model, tokenizer, args):
 def main():
     root_path = "/root/work2/work2/chenzhihao/NLP"
     config = {
-        'model_type': "wobert-base",
-        'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese_wobert_base",
+        'model_type': "roberta-wwm-ext",
+        'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'output_dir': root_path + "/experiments/output_file_dir/semantic_match",
         'config_path': None,
         'tokenizer_path': None,
@@ -248,10 +241,10 @@ def main():
         'train_batch_size': 64,
         'valid_batch_size': 64,
         'test_batch_size': 64,
-        'num_epochs': 30,
+        'num_epochs': 100,
         'max_seq_length': 128,
         'eval_steps': 500,
-        'object_type': "classification",  # classification, regression, triplet
+        'object_type': "regression",  # classification, regression, triplet
         'task_type': "match",  # "match" or "nli"
         'scheduler_type': "linear",
         'pooling_strategy': "last-avg",  # first-last-avg, last-avg, cls, pooler
@@ -263,8 +256,8 @@ def main():
         'test_dataset': "test.data",
         'project_name': 'semantic_match',
         'group_name': "nlp",
-        'experiment_name': "BQ_sbert2-wobert-base",
-        'cuda_number': "2",
+        'experiment_name': "BQ_sbert2-roberta-wwm-ext",
+        'cuda_number': "3",
         'num_worker': 4,
         'seed': 2333
     }
