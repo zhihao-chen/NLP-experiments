@@ -1083,3 +1083,25 @@ class VaSCLBERT(BertPreTrainedModel):
             return feat1, feat2
         else:
             return feat1
+
+
+class CrossEncoder(nn.Module):
+    def __init__(self, config, model_name_or_path=None, num_labels=2, dropout_rate=0.5):
+        super(CrossEncoder, self).__init__()
+        self.config = config
+        if model_name_or_path is not None:
+            self.bert = BertModel.from_pretrained(model_name_or_path)
+        else:
+            self.bert = BertModel(config=config)
+        self.dropout = nn.Dropout(p=dropout_rate)
+        self.classifier = nn.Linear(self.config.hidden_size, num_labels)
+        self.activate_func = nn.Softmax(dim=-1)
+
+    def forward(self, input_ids, attention_mask, token_type_ids):
+        output = self.bert(input_ids, attention_mask, token_type_ids, output_hidden_states=True)
+        sequence_output = output.last_hidden_state
+        cls_embed = sequence_output[:, 0]  # [b,d]
+        cls_embed = self.dropout(cls_embed)
+        logit = self.activate_func(self.classifier(cls_embed))
+        return logit
+
