@@ -235,13 +235,13 @@ def main():
         'warmup_ratio': 0.1,
         'adam_epsilon': 1e-8,
         'weight_decay': 0.01,
-        'data_type': "BQ",  # ATEC, BQ, LCQMC, PAWSX, STS-B
-        'train_dataset': "train.txt",  # train.data
-        'valid_dataset': "dev.txt",  # valid.data
-        'test_dataset': "test.txt",  # test.data
+        'data_type': "PAWSX",  # ATEC, BQ, LCQMC, PAWSX, STS-B
+        'train_dataset': "train.data",  # train.data
+        'valid_dataset': "valid.data",  # valid.data
+        'test_dataset': "test.data",  # test.data
         'project_name': 'semantic_match',
         'group_name': "nlp",
-        'experiment_name': "BQ_pairscl_sbert-roberta-wwm-ext",
+        'experiment_name': "PAWSX_pairscl_sbert-roberta-wwm-ext",
         'cuda_number': "3",
         'num_worker': 4,
         'seed': 2333

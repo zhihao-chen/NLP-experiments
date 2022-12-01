@@ -305,7 +305,7 @@ def main():
         'data_dir': "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/",
         'data_type': "BQ",  # ATEC, BQ, LCQMC, PAWSX
         'train_dataset': "train.data",
-        'valid_dataset': "dev.data",
+        'valid_dataset': "valid.data",
         'test_dataset': "test.data",
         'project_name': 'semantic_match',
         'group_name': 'nlp',

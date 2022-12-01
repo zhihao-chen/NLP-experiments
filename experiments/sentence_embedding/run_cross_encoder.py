@@ -85,12 +85,12 @@ def main():
     config = {
         'model_type': "structbert-large-zh",
         # 'model_name': root_path + "pretrained_models/chinese-roberta-wwm-ext",
-        'model_name': root_path + "pretrained_models/structbert-large-zh",
+        'model_name': "/root/work2/work2/chenzhihao/pretrained_models/structbert-large-zh",
         'data_dir': '/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/',
         'output_dir': root_path + "/experiments/output_file_dir/semantic_match",
-        'data_type': 'BQ',  # ATEC, BQ, LCQMC, PAWSX
+        'data_type': 'ATEC',  # ATEC, BQ, LCQMC, PAWSX
         'train_dataset': "train.data",
-        'valid_dataset': "dev.data",
+        'valid_dataset': "valid.data",
         'test_dataset': "test.data",
         'batch_size': 20,
         'num_epochs': 30,
@@ -99,7 +99,7 @@ def main():
         'gradient_accumulation_steps': 1,
         'warmup_ratio': 0.1,
         'use_amp': True,
-        'cuda_number': 5
+        'cuda_number': 2
     }
     data_dir = config['data_dir'] + config['data_type']
     if not os.path.exists(data_dir):
@@ -118,13 +118,13 @@ def main():
                          max_length=config['max_seq_length'])
 
     logger.info("****** prepare datas ******")
-    train_data_dir = config['data_dir']
-    valid_data_dir = config['data_dir']
-    test_data_dir = config['data_dir']
+    train_data_dir = config['data_dir'] + config['data_type']
+    valid_data_dir = config['data_dir'] + config['data_type']
+    test_data_dir = config['data_dir'] + config['data_type']
     # 准备数据
-    train_samples = prepare_datasets(os.path.join(train_data_dir, config['train_dataset']))
-    valid_samples = prepare_datasets(os.path.join(valid_data_dir, config['valid_dataset']))
-    test_samples = prepare_datasets(os.path.join(test_data_dir, config['test_dataset']))
+    train_samples = prepare_datasets(os.path.join(train_data_dir, config['data_type']+'.'+config['train_dataset']))
+    valid_samples = prepare_datasets(os.path.join(valid_data_dir, config['data_type']+'.'+config['valid_dataset']))
+    test_samples = prepare_datasets(os.path.join(test_data_dir, config['data_type']+'.'+config['test_dataset']))
 
     logger.info("****** init evaluator *******")
     # dev_evaluator = CESoftmaxAccuracyEvaluator.from_input_examples(valid_samples, name=f"{config['data_type']}-valid")
