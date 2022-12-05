@@ -4,10 +4,10 @@ OUTPUT_DIR=$PROJECT_PATH/experiments/output_file_dir/semantic_match
 MODEL_PATH="/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext"
 
 PROJECT_NAME='semantic_match'
-EXPERIMENT_NAME='bq-pairsupcon-roberta-wwm-ext'
+EXPERIMENT_NAME='atec-pairsupcon-roberta-wwm-ext'
 GROUP_NAME='nlp'
 MODEL_TYPE='roberta-wwm-ext'
-DATA_TYPE='BQ'
+DATA_TYPE='ATEC'
 
 python $PROJECT_PATH/experiments/sentence_embedding/run_pair_sup_con.py \
   --model_type=$MODEL_TYPE \
@@ -29,7 +29,7 @@ python $PROJECT_PATH/experiments/sentence_embedding/run_pair_sup_con.py \
   --train_batch_size=256 \
   --valid_batch_size=128 \
   --num_train_epochs=200 \
-  --gpuid=3 \
+  --gpuid=4 \
   --seed=2333 \
   --num_worker=0 \
   --num_labels=2 \

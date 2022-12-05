@@ -23,6 +23,7 @@ from torch.optim import Adam, AdamW
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from transformers import BertConfig, AutoTokenizer, set_seed, get_scheduler
+from sklearn.metrics.pairwise import paired_cosine_distances
 
 from nlp.tools.common import init_wandb_writer
 from nlp.models.sentence_embedding_models import PairSupConBert
@@ -161,6 +162,7 @@ def evaluate(dataloader, model, args):
     b_vecs = l2_normalize(all_neg_vectors)
 
     cosine_scores = (a_vecs * b_vecs).sum(axis=1)
+    # cosine_scores = 1 - (paired_cosine_distances(all_pos_vectors, all_neg_vectors))
     corrcoef = compute_corrcoef(all_labels, cosine_scores)
     pearsonr = compute_pearsonr(all_labels, cosine_scores)
     return corrcoef, pearsonr

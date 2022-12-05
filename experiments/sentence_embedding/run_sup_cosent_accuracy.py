@@ -210,11 +210,12 @@ def init_model(model_name_or_path, args, flag='train'):
     """
     bert_config = BertConfig.from_pretrained(args['config_path'] if args['config_path'] else model_name_or_path)
     if flag == 'train':
+        bert_config.save_pretrained(args['model_save_path'])
         model = CoSENT(bert_config=bert_config, model_name_or_path=model_name_or_path,
                        pooler_type=args['pooling_strategy'])
     else:
         model = CoSENT(bert_config=bert_config, pooler_type=args['pooling_strategy'])
-        model.load_state_dict(torch.load(model_name_or_path + "/best_model.bin", map_location=args['device']))
+        model.load_state_dict(torch.load(model_name_or_path + "/pytorch_model.bin", map_location=args['device']))
     return model
 
 
@@ -264,10 +265,10 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     optimizer, scheduler = init_optimizer(t_total, optimizer_grouped_parameters, args)
 
     global WANDB
-    WANDB, run = init_wandb_writer(project_name='semantic_match',
+    WANDB, run = init_wandb_writer(project_name=args['project_name'],
                                    train_args=train_config,
-                                   group_name="nlp",
-                                   experiment_name="sts-b-sup_cosent_accuracy-roberta-wwm-ext")
+                                   group_name=args['group_name'],
+                                   experiment_name=args['experiment_name'])
 
     # Train!
     print("***** Running training *****")
@@ -327,8 +328,9 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
             best_epoch = best_epoch
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-            output_file = os.path.join(args['model_save_path'], 'best_model.bin')
+            output_file = os.path.join(args['model_save_path'], 'pytorch_model.bin')
             torch.save(model_to_save.state_dict(), output_file)
+            tokenizer.save_pretrained(args['model_save_path'])
             loginfo = "best_epoch: {}\tbest accuracy: {}\tbest threshold: {}\tpearsonr: {}\tspearman: {}".format(
                     best_epoch, best_score, best_threshold, best_pearsonr, best_spearman)
             print(loginfo)
@@ -353,9 +355,9 @@ def main():
         'adam_epsilon': 1e-8,
         'weight_decay': 0.01,
         'scheduler_type': 'linear',
-        'train_batch_size': 64,  # 必须是2的倍数
-        'valid_batch_size': 64,
-        'test_batch_size': 64,
+        'train_batch_size': 20,  # 必须是2的倍数
+        'valid_batch_size': 20,
+        'test_batch_size': 20,
         'num_train_epochs': 30,
         'max_seq_length': 128,
         'eval_steps': 500,
@@ -363,10 +365,13 @@ def main():
         'object_type': "classification",  # classification, regression, triplet
         'task_type': "match",  # "match" or "nli"
         'pooling_strategy': "cls",  # first-last-avg, last-avg, cls, pooler
-        'data_type': "STS-B",  # ATEC, BQ, LCQMC, PAWSX, STS-B
+        'data_type': "ATEC",  # ATEC, BQ, LCQMC, PAWSX, STS-B
         'train_dataset': "train.data",
         'valid_dataset': "valid.data",
         'test_dataset': "test.data",
+        'project_name': 'semantic_match',
+        'group_name': "nlp",
+        'experiment_name': "atec_supcosent-accuracy-roberta-wwm-ext",
         'cuda_number': "3",
         'num_worker': 4,
         'seed': 2333

@@ -160,11 +160,12 @@ def train(train_samples, valid_samples, model, tokenizer, args):
     model.zero_grad()
     best_score = 0.0
     best_epoch = 0
+    patience = 0
     set_seed(args['seed'])
     for epoch in range(args['num_epochs']):
         model.train()
         total_loss = 0.0
-        for step, batch in enumerate(tqdm(train_dataloader, desc="Training")):
+        for step, batch in enumerate(tqdm(train_dataloader, desc=f"Training {epoch}/{args['num_epochs']}")):
             inputs = {
                 'anchor_input_ids': batch['anchor_input_ids'].to(args['device']),
                 'pos_input_ids': batch['pos_input_ids'].to(args['device']),
@@ -193,6 +194,7 @@ def train(train_samples, valid_samples, model, tokenizer, args):
         if corrcoef > best_score:
             best_score = corrcoef
             best_epoch = best_epoch
+            patience = 0
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
             output_file = os.path.join(args['model_save_path'], 'best_model.bin')
@@ -204,6 +206,10 @@ def train(train_samples, valid_samples, model, tokenizer, args):
             with codecs.open(os.path.join(args['model_save_path'], "eval_result.txt"), "w",
                              encoding="utf8") as fw:
                 fw.write("best_epoch: {}\nspearman: {}\npearsonr: {}".format(best_epoch, best_score, pearsonr))
+        else:
+            patience += 1
+            if patience >= 10:
+                break
 
 
 def main():

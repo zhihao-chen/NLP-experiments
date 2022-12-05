@@ -73,7 +73,7 @@ def train(train_samples, model, dev_evaluator, args):
 
 def test_model(model_save_path, test_evaluator, config):
     logging.info("***** test model *****")
-    model = CrossEncoder(model_name=model_save_path, num_labels=1, device=config['device'],
+    model = CrossEncoder(model_name=model_save_path, num_labels=config['num_labels'], device=config['device'],
                          max_length=config['max_seq_length'])
     model.max_seq_length = config['max_seq_length']
     test_evaluator(model, output_path=model_save_path)
@@ -92,6 +92,7 @@ def main():
         'train_dataset': "train.data",
         'valid_dataset': "valid.data",
         'test_dataset': "test.data",
+        'num_labels': 2,
         'batch_size': 20,
         'num_epochs': 30,
         'max_seq_length': 512,
@@ -114,7 +115,7 @@ def main():
     config['device'] = device
 
     logger.info("****** Loading model ******")
-    model = CrossEncoder(config['model_name'], num_labels=1, device=config['device'],
+    model = CrossEncoder(config['model_name'], num_labels=config['num_labels'], device=config['device'],
                          max_length=config['max_seq_length'])
 
     logger.info("****** prepare datas ******")
@@ -127,10 +128,12 @@ def main():
     test_samples = prepare_datasets(os.path.join(test_data_dir, config['data_type']+'.'+config['test_dataset']))
 
     logger.info("****** init evaluator *******")
-    # dev_evaluator = CESoftmaxAccuracyEvaluator.from_input_examples(valid_samples, name=f"{config['data_type']}-valid")
-    # test_evaluator = CESoftmaxAccuracyEvaluator.from_input_examples(test_samples, name=f"{config['data_type']}-test")
-    dev_evaluator = CEBinaryClassificationEvaluator.from_input_examples(valid_samples, name=f"{config['data_type']}-valid")
-    test_evaluator = CEBinaryClassificationEvaluator.from_input_examples(test_samples, name=f"{config['data_type']}-test")
+    if config['num_labels'] == 2:
+        dev_evaluator = CESoftmaxAccuracyEvaluator.from_input_examples(valid_samples, name=f"{config['data_type']}-valid")
+        test_evaluator = CESoftmaxAccuracyEvaluator.from_input_examples(test_samples, name=f"{config['data_type']}-test")
+    else:
+        dev_evaluator = CEBinaryClassificationEvaluator.from_input_examples(valid_samples, name=f"{config['data_type']}-valid")
+        test_evaluator = CEBinaryClassificationEvaluator.from_input_examples(test_samples, name=f"{config['data_type']}-test")
 
     train(train_samples, model, dev_evaluator, config)
 

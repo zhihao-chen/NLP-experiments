@@ -199,6 +199,7 @@ def init_model(model_name_or_path, args, flag='train'):
     """
     bert_config = BertConfig.from_pretrained(args['config_path'] if args['config_path'] else model_name_or_path)
     if flag == 'train':
+        bert_config.save_pretrained(args['model_save_path'])
         model = CoSENT(bert_config=bert_config, model_name_or_path=model_name_or_path,
                        pooler_type=args['pooling_strategy'])
     else:
@@ -313,8 +314,9 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
             best_epoch = best_epoch
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-            output_file = os.path.join(args['model_save_path'], 'best_model.bin')
+            output_file = os.path.join(args['model_save_path'], 'pytorch_model.bin')
             torch.save(model_to_save.state_dict(), output_file)
+            tokenizer.save_pretrained(args['model_save_path'])
             with codecs.open(os.path.join(args['model_save_path'], "eval_result.txt"), "w", encoding="utf8") as fw:
                 fw.write("best_epoch: {}\tpearsonr: {}\tspearman: {}".format(best_epoch,
                                                                              best_score_pearsonr,

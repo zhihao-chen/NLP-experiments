@@ -61,7 +61,7 @@ def init_model(model_path, num_labels, args, flag="train"):
                            num_labels=num_labels, object_type=args['object_type'])
     else:
         model = SBERTModel(bert_config=bert_config, num_labels=num_labels, object_type=args['object_type'])
-        model.load_state_dict(torch.load(model_path + "/best_model.bin", map_location=args['device']))
+        model.load_state_dict(torch.load(model_path + "/pytorch_model.bin", map_location=args['device']))
     return model
 
 
@@ -231,7 +231,7 @@ def train(train_samples, valid_samples, model, tokenizer, args):
             best_epoch = epoch
 
             model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-            output_file = os.path.join(args['model_save_path'], 'best_model.bin')
+            output_file = os.path.join(args['model_save_path'], 'pytorch_model.bin')
             torch.save(model_to_save.state_dict(), output_file)
             tokenizer.save_pretrained(args['model_save_path'])
             loginfo = "best_epoch: {}\tbest accuracy: {}\tbest threshold: {}\tpearsonr: {}\tspearman: {}".format(
