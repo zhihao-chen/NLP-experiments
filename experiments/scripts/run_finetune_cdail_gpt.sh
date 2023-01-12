@@ -1,9 +1,9 @@
-PROJECT_PATH=/data2/work2/chenzhihao/NLP
+PROJECT_PATH=/root/work2/work2/chenzhihao/NLP
 DATA_PATH=$PROJECT_PATH/datas/raw_datas/
 OUTPUT_DIR=$PROJECT_PATH/datas/output_dir/CDail-GPT-QA
 MODEL_CHECKPOINT=$PROJECT_PATH/datas/output_dir/CDail-GPT-QA
 
-python $PROJECT_PATH/examples/qa_and_text_generation/finetune_cdail_gpt.py \
+python $PROJECT_PATH/experiments/qa_and_text_generation/finetune_cdail_gpt.py \
   --pretrained \
   --model_checkpoint=$MODEL_CHECKPOINT \
   --data_path=$DATA_PATH \

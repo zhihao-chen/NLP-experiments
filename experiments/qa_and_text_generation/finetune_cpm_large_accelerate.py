@@ -28,7 +28,8 @@ from rouge import Rouge
 from sklearn.metrics import precision_recall_fscore_support
 
 dirname = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join('/'.join(dirname.split('/')[:-2]), 'nlp'))
+print(dirname)
+sys.path.append(os.path.join('/'.join(dirname.split('/')[:-2])))
 from nlp.processors.dataset import CPMDataset
 from nlp.utils.generate_util import top_filtering
 

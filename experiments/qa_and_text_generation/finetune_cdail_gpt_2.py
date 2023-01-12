@@ -3,14 +3,12 @@
 """
 @author: czh
 @email:
-@date: 2022/7/7 11:26
+@date: 2023/1/11 19:31
 """
-# finetune CDial-GPT
-# https://github.com/thu-coai/CDial-GPT/blob/master/train.py
+# 对话任务
 import os
 import sys
 import codecs
-import random
 import logging
 import math
 import json
@@ -18,54 +16,69 @@ from tqdm import tqdm
 from pprint import pformat
 from argparse import ArgumentParser
 
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import Dataset, DataLoader
-from ignite.engine import Engine, Events
-from ignite.handlers import ModelCheckpoint
-from ignite.metrics import Loss, MetricsLambda, RunningAverage
-from ignite.contrib.handlers import ProgressBar, PiecewiseLinear, LRScheduler
-from ignite.contrib.handlers.tensorboard_logger import TensorboardLogger, OutputHandler, OptimizerParamsHandler
 from transformers import AdamW, Trainer, Pipeline, get_scheduler
-from transformers import (OpenAIGPTLMHeadModel, OpenAIGPTConfig, GPT2LMHeadModel, BertTokenizer,
+from transformers import (OpenAIGPTLMHeadModel, OpenAIGPTConfig, GPT2LMHeadModel, BertTokenizer, set_seed,
                           GPT2Config, CONFIG_NAME, WEIGHTS_NAME)
 dirname = os.path.dirname(os.path.abspath(__file__))
 print(dirname)
 sys.path.append(os.path.join('/'.join(dirname.split('/')[:-2])))
 
-from nlp.processors.dataset import CdailQADataset
+from nlp.processors.dataset import CdailDataset
 
 logger = logging.getLogger(__file__)
 
 
-def setup_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-setup_seed(2019)
-
-
-def load_qa_json_data(data_path):
+def load_lccc_datas(input_file):
     """
-    数据形式：每一行是一对QA，{'question':'', 'answer':''}
-    :param data_path:
+    读取lccc对话数据，数据格式[[s1, s2, s3, ...], [s1, s2, s3, ...]]
+    :param input_file:
     :return:
     """
-    all_datas = []
-    with codecs.open(data_path, encoding="utf8") as fr:
-        for line in fr:
-            line = line.strip()
-            if not line:
-                continue
-            all_datas.append(json.loads(line))
-    return all_datas
+    with codecs.open(input_file, encoding="utf8") as fr:
+        datasets = json.load(fr)
+    return datasets
+
+
+def load_natural_conv_dataset(dialogue_release, train_path, valid_path, test_path):
+    """
+    读取腾讯natural_conv 对话数据集。
+    :param dialogue_release: dialog_release.json 格式：{'dialog_id': '0_3', 'document_id': 0, 'content': []}
+    :param train_path:train.txt  每行表示"dialog_id"
+    :param valid_path:dev.txt 每行表示"dialog_id"
+    :param test_path:test.txt 每行表示"dialog_id"
+    :return:
+    """
+    id2content = {}
+    with codecs.open(dialogue_release, encoding='utf8') as fr:
+        dialogue_list = json.load(fr)
+        for item in dialogue_list:
+            dialog_id = item['dialog_id']
+            content = item['content']
+            id2content[dialog_id] = content
+
+    def load_samples(input_file):
+        samples = []
+        with codecs.open(input_file, encoding='utf8') as fr_train:
+            for line in fr_train:
+                line = line.strip()
+                if not line:
+                    continue
+                if line in id2content:
+                    sample = id2content[line]
+                    samples.append(sample)
+        return samples
+    train_samples = load_samples(train_path)
+    print("total train data: ", len(train_samples))
+    valid_samples = load_samples(valid_path)
+    print("total train data: ", len(valid_samples))
+    test_samples = load_samples(test_path)
+    print("total train data: ", len(test_samples))
+    return train_samples, valid_samples, test_samples
 
 
 def average_distributed_scalar(scalar, args):
@@ -86,12 +99,16 @@ def get_parse():
     parser.add_argument('--pretrained', action='store_true', help="If False train from scratch")
     parser.add_argument("--data_path", type=str, default="",
                         help="Path or url of the dataset. ")
+    parser.add_argument('--data_type', type=str, default="lccc", choices=["lccc", "natural_conv"])
     parser.add_argument("--do_train", action="store_true")
     parser.add_argument("--do_valid", action="store_true")
-    parser.add_argument("--train_path", type=str, default="data/toy_train.txt",
+    parser.add_argument("--do_test", action="store_true")
+    parser.add_argument("--train_path", type=str, default=None,
                         help="Path of the train dataset for dist dataset. ")
-    parser.add_argument("--valid_path", type=str, default="data/toy_valid.txt",
+    parser.add_argument("--valid_path", type=str, default=None,
                         help="Path of the valid dataset for dist dataset. ")
+    parser.add_argument("--test_path", type=str, default=None,
+                        help="Path of the test dataset for dist dataset. ")
     parser.add_argument("--dataset_cache", type=str, default="dataset_cache",
                         help="Path or url of the dataset cache")
     parser.add_argument('--log_file', '-log_file', type=str, default="", help="Output logs to a file under this path")
@@ -118,6 +135,7 @@ def get_parse():
     parser.add_argument("--fp16_backend", type=str, default="amp")
     parser.add_argument("--local_rank", type=int, default=-1,
                         help="Local rank for distributed training (-1: not distributed)")
+    parser.add_argument("--seed", type=int, default=2333)
     args = parser.parse_args()
     return args
 
@@ -169,7 +187,7 @@ def evaluate(valid_loader, model, args):
 
 
 def train(train_samples, valid_sample, model, tokenizer, args):
-    train_dataset = CdailQADataset(train_samples, tokenizer)
+    train_dataset = CdailDataset(train_samples, tokenizer)
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if args.distributed else None
     train_loader = DataLoader(train_dataset,
                               sampler=train_sampler,
@@ -178,7 +196,7 @@ def train(train_samples, valid_sample, model, tokenizer, args):
                               batch_size=args.train_batch_size,
                               shuffle=(not args.distributed))
 
-    valid_dataset = CdailQADataset(valid_sample, tokenizer)
+    valid_dataset = CdailDataset(valid_sample, tokenizer)
     valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_dataset) if args.distributed else None
     valid_loader = DataLoader(valid_dataset, sampler=valid_sampler,
                               collate_fn=valid_dataset.collate,
@@ -258,8 +276,6 @@ def train(train_samples, valid_sample, model, tokenizer, args):
                     model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
                     if not os.path.exists(args.output_dir):
                         os.makedirs(args.output_dir)
-                    # output_file = os.path.join(args.output_dir, 'pytorch_model.bin')
-                    # torch.save(model_to_save.state_dict(), output_file)
 
                     model_to_save.save_pretrained(args.output_dir)
                     tokenizer.save_vocabulary(args.output_dir)
@@ -274,6 +290,7 @@ def train(train_samples, valid_sample, model, tokenizer, args):
 def main():
     args = get_parse()
 
+    set_seed(args.seed)
     # logging is set to INFO (resp. WARN) for main (resp. auxiliary) process.
     # logger.info => log main process only, logger.warning => log all processes
     logging.basicConfig(level=logging.INFO if args.local_rank in [-1, 0] else logging.WARN)
@@ -288,19 +305,32 @@ def main():
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
     else:
         args.device = torch.device(args.device)
+
     logger.info("Prepare tokenizer, pretrained model and optimizer - add special tokens for fine-tuning")
     tokenizer, model = init_model(args)
     model.to(args.device)
 
     logger.info("Prepare train samples and valid samples")
-    all_samples = load_qa_json_data(os.path.join(args.data_path, 'financezhidao.json'))
-    np.random.shuffle(all_samples)
-    train_len = int(len(all_samples) * 0.8)
-    train_samples = all_samples[:train_len]
-    valid_samples = all_samples[train_len:]
+    assert args.train_path
+    assert args.valid_path
+    assert args.test_path
+
+    train_path = os.path.join(args.data_path, args.train_path)
+    valid_path = os.path.join(args.data_path, args.valid_path)
+    test_path = os.path.join(args.data_path, args.test_path)
+    if args.data_type == "lccc":
+        train_samples = load_lccc_datas(train_path)
+        valid_samples = load_lccc_datas(valid_path)
+        test_samples = load_lccc_datas(test_path)
+    elif args.data_type == "natural_conv":
+        dialog_release = os.path.join(args.data_path, "dialog_release.json")
+        train_samples, valid_samples, test_samples = load_natural_conv_dataset(dialog_release, train_path,
+                                                                               valid_path, test_path)
+    else:
+        raise ValueError("data_type must be one of [lccc, natural_conv]")
 
     if args.eval_before_start:
-        valid_dataset = CdailQADataset(valid_samples, tokenizer)
+        valid_dataset = CdailDataset(train_samples, tokenizer)
         valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_dataset) if args.distributed else None
         valid_loader = DataLoader(valid_dataset, sampler=valid_sampler,
                                   collate_fn=valid_dataset.collate,
@@ -317,7 +347,7 @@ def main():
         tokenizer, model = init_model(args)
         model.to(args.device)
 
-        valid_dataset = CdailQADataset(valid_samples, tokenizer)
+        valid_dataset = CdailDataset(valid_samples, tokenizer)
         valid_sampler = torch.utils.data.distributed.DistributedSampler(valid_dataset) if args.distributed else None
         valid_loader = DataLoader(valid_dataset, sampler=valid_sampler,
                                   collate_fn=valid_dataset.collate,
@@ -327,6 +357,22 @@ def main():
         valid_loss, valid_ppl = evaluate(valid_loader, model, args)
         print(f"valid loss: {valid_loss}\tvalid ppl: {valid_ppl}")
 
+    if args.do_test:
+        args.model_checkpoint = args.output_dir
+        tokenizer, model = init_model(args)
+        model.to(args.device)
+
+        test_dataset = CdailDataset(test_samples, tokenizer)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset) if args.distributed else None
+        test_loader = DataLoader(test_dataset, sampler=test_sampler,
+                                 collate_fn=test_dataset.collate,
+                                 num_workers=args.num_workers,
+                                 batch_size=args.valid_batch_size,
+                                 shuffle=False)
+        test_loss, test_ppl = evaluate(test_loader, model, args)
+        print(f"valid loss: {test_loss}\tvalid ppl: {test_ppl}")
+
 
 if __name__ == "__main__":
     main()
+

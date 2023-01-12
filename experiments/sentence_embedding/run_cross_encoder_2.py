@@ -23,7 +23,7 @@ from sklearn.metrics import precision_recall_fscore_support
 
 dirname = os.path.dirname(os.path.abspath(__file__))
 print(dirname)
-sys.path.append(os.path.join('/'.join(dirname.split('/')[:-1])))
+sys.path.append(os.path.join('/'.join(dirname.split('/')[:-2])))
 from nlp.models.sentence_embedding_models import CrossEncoder
 from nlp.tools.common import init_wandb_writer
 

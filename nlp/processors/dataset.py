@@ -11,6 +11,7 @@
 """
 from tqdm import tqdm
 from typing import List
+from itertools import chain
 
 import torch
 import numpy as np
@@ -193,6 +194,73 @@ class CdailQADataset(Dataset):
         if self.lm_labels:
             # instance["lm_labels"] = ([-1] * sum(len(s) for s in sequence[:-1])) + [-1] + sequence[-1][1:]
             instance['lm_labels'] = [-1] * 2 + [-1] * len(question_ids) + [-1] + answer_ids + [eos]
+
+        return instance
+
+    def collate(self, batch):
+        input_ids = pad_sequence(
+            [torch.tensor(instance["input_ids"], dtype=torch.long) for instance in batch],
+            batch_first=self.batch_first, padding_value=self.pad)
+        token_type_ids = pad_sequence(
+            [torch.tensor(instance["token_type_ids"], dtype=torch.long) for instance in batch],
+            batch_first=self.batch_first, padding_value=self.pad)
+        labels = pad_sequence(
+            [torch.tensor(instance["lm_labels"], dtype=torch.long) for instance in batch],
+            batch_first=self.batch_first, padding_value=-1)
+        return {
+            'input_ids': input_ids,
+            'token_type_ids': token_type_ids,
+            'labels': labels
+        }
+
+
+class CdailDataset(Dataset):
+    """
+    项目原始数据类，处理对话数据
+    参考https://github.com/thu-coai/CDial-GPT/blob/81064865221d3503251d633f3d0b651004c938a6/od/inputters/dataset_wb.py
+    """
+    SPECIAL_TOKENS = ["[CLS]", "[SEP]", "[speaker1]", "[speaker2]"]
+    MODEL_INPUTS = ["input_ids", "lm_labels", "token_type_ids"]
+
+    def __init__(self, dataset, tokenizer, max_history=15, batch_first=True, lm_labels=True):
+        super(CdailDataset, self).__init__()
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+        self.max_history = max_history
+        self.pad = tokenizer.pad_token_id
+        self.batch_first = batch_first
+        self.lm_labels = lm_labels
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        if self.lm_labels:
+            history = self.dataset[index][-2 * self.max_history:-1]
+            resposne = self.dataset[index][-1]
+        else:
+            history = self.dataset[index][-2 * self.max_history:-1]
+            resposne = []
+        return self.process(history, resposne)
+
+    def process(self, history, response, with_eos=True):
+        bos, eos, speaker1, speaker2 = self.tokenizer.convert_tokens_to_ids(self.SPECIAL_TOKENS)
+        history_ids = []
+        for h in history:
+            h_ids = self.tokenizer(h, add_special_tokens=False, truncation=False, padding=False)['input_ids']
+            history_ids.append(h_ids)
+        response_ids = self.tokenizer(response, add_special_tokens=False, truncation=False, padding=False)['input_ids']
+        sequence = [[bos]] + history_ids + [response_ids + ([eos] if with_eos else [])]
+        sequence = [sequence[0]] + [[speaker2 if i % 2 else speaker1] + s
+                                    for i, s in enumerate(sequence[1:])]
+        instance = {}
+        instance["input_ids"] = list(chain(*sequence))
+        instance["token_type_ids"] = [bos] + [speaker2 if i % 2 else speaker1 for i, s in
+                                              enumerate(sequence[1:])
+                                              for _ in s]
+        instance["lm_labels"] = [-1] * len(instance["input_ids"])
+        if self.lm_labels:
+            instance["lm_labels"] = ([-1] * sum(len(s) for s in sequence[:-1])) + [-1] + sequence[-1][1:]
 
         return instance
 
