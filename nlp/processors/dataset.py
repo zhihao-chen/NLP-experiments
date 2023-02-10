@@ -222,35 +222,43 @@ class CdailDataset(Dataset):
     SPECIAL_TOKENS = ["[CLS]", "[SEP]", "[speaker1]", "[speaker2]"]
     MODEL_INPUTS = ["input_ids", "lm_labels", "token_type_ids"]
 
-    def __init__(self, dataset, tokenizer, max_history=15, batch_first=True, lm_labels=True):
+    def __init__(self, dataset, tokenizer, max_history=15, max_length=512,
+                 batch_first=True, lm_labels=True, with_eos=True):
         super(CdailDataset, self).__init__()
         self.dataset = dataset
         self.tokenizer = tokenizer
         self.max_history = max_history
+        self.max_length = max_length
         self.pad = tokenizer.pad_token_id
         self.batch_first = batch_first
         self.lm_labels = lm_labels
+        self.with_eos = with_eos
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        if self.lm_labels:
-            history = self.dataset[index][-2 * self.max_history:-1]
-            resposne = self.dataset[index][-1]
-        else:
-            history = self.dataset[index][-2 * self.max_history:-1]
-            resposne = []
-        return self.process(history, resposne)
-
-    def process(self, history, response, with_eos=True):
         bos, eos, speaker1, speaker2 = self.tokenizer.convert_tokens_to_ids(self.SPECIAL_TOKENS)
+        dataset = self.dataset[index][-2 * self.max_history:]
+
+        input_ids = [bos]
         history_ids = []
-        for h in history:
+        for i, h in enumerate(dataset):
             h_ids = self.tokenizer(h, add_special_tokens=False, truncation=False, padding=False)['input_ids']
-            history_ids.append(h_ids)
-        response_ids = self.tokenizer(response, add_special_tokens=False, truncation=False, padding=False)['input_ids']
-        sequence = [[bos]] + history_ids + [response_ids + ([eos] if with_eos else [])]
+            if i % 2 == 0:
+                sp = speaker1
+            else:
+                sp = speaker2
+            if len(input_ids) + len(h_ids) + 1 <= self.max_length:
+                input_ids.append(sp)
+                input_ids.extend(h_ids)
+                history_ids.append(h_ids)
+        if self.lm_labels:
+            response_ids = history_ids[-1]
+            history_ids = history_ids[:-1]
+        else:
+            response_ids = []
+        sequence = [[bos]] + history_ids + [response_ids + ([eos] if self.with_eos else [])]
         sequence = [sequence[0]] + [[speaker2 if i % 2 else speaker1] + s
                                     for i, s in enumerate(sequence[1:])]
         instance = {}
@@ -261,7 +269,6 @@ class CdailDataset(Dataset):
         instance["lm_labels"] = [-1] * len(instance["input_ids"])
         if self.lm_labels:
             instance["lm_labels"] = ([-1] * sum(len(s) for s in sequence[:-1])) + [-1] + sequence[-1][1:]
-
         return instance
 
     def collate(self, batch):

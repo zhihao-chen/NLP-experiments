@@ -22,13 +22,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
-from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import Dataset, DataLoader
-from ignite.engine import Engine, Events
-from ignite.handlers import ModelCheckpoint
-from ignite.metrics import Loss, MetricsLambda, RunningAverage
-from ignite.contrib.handlers import ProgressBar, PiecewiseLinear, LRScheduler
-from ignite.contrib.handlers.tensorboard_logger import TensorboardLogger, OutputHandler, OptimizerParamsHandler
 from transformers import AdamW, Trainer, Pipeline, get_scheduler
 from transformers import (OpenAIGPTLMHeadModel, OpenAIGPTConfig, GPT2LMHeadModel, BertTokenizer,
                           GPT2Config, CONFIG_NAME, WEIGHTS_NAME)
