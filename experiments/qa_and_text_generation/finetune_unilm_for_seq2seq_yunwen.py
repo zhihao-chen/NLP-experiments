@@ -19,9 +19,10 @@ from tqdm import tqdm, trange
 
 import torch
 from torch.utils.data import RandomSampler
+from torch.optim import Adam
 from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as dist
-from transformers import AdamW, get_scheduler, set_seed
+from transformers import get_scheduler, set_seed
 
 dirname = os.path.dirname(os.path.abspath(__file__))
 print(dirname)
@@ -198,8 +199,7 @@ def init_optimizer_and_scheduler(args, model, t_total):
         {'params': [p for n, p in param_optimizer if any(
             nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
-    optimizer = AdamW(optimizer_grouped_parameters,
-                      lr=args.learning_rate, eps=args.adam_epsilon)
+    optimizer = Adam(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_scheduler(args.scheduler, optimizer=optimizer,
                               num_warmup_steps=int(args.warmup_proportion * t_total),
                               num_training_steps=t_total)
@@ -254,14 +254,17 @@ def train(args, model_class, config, train_dataloader, train_sampler):
 
     optimizer, scheduler = init_optimizer_and_scheduler(args, model, t_total)
 
+    # if args.fp16:
+    #     try:
+    #         from apex import amp
+    #     except ImportError:
+    #         raise ImportError(
+    #             "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
+    #     model, optimizer = amp.initialize(
+    #         model, optimizer, opt_level=args.fp16_opt_level)
     if args.fp16:
-        try:
-            from apex import amp
-        except ImportError:
-            raise ImportError(
-                "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
-        model, optimizer = amp.initialize(
-            model, optimizer, opt_level=args.fp16_opt_level)
+        from torch.cuda.amp import autocast, GradScaler
+        scaler = GradScaler()
 
     if args.local_rank != -1:
         try:
@@ -283,7 +286,8 @@ def train(args, model_class, config, train_dataloader, train_sampler):
         logger.info("***** Recover amp: %d *****", recover_step)
         amp_recover = torch.load(os.path.join(
             args.output_dir, "amp.{0}.bin".format(recover_step)), map_location='cpu')
-        amp.load_state_dict(amp_recover)
+        # amp.load_state_dict(amp_recover)
+        scaler.load_state_dict(amp_recover)
 
         logger.info("***** Recover scheduler: %d *****", recover_step)
         scheduler_recover = torch.load(os.path.join(
@@ -311,8 +315,13 @@ def train(args, model_class, config, train_dataloader, train_sampler):
         for step, batch in enumerate(iter_bar):
             batch = [t.to(args.device) if t is not None else None for t in batch]
             input_ids, segment_ids, input_mask, lm_label_ids, masked_pos, masked_weights, _ = batch
-            masked_lm_loss = model(input_ids, segment_ids, input_mask, lm_label_ids,
-                                   masked_pos=masked_pos, masked_weights=masked_weights)
+            if args.fp16:
+                with autocast():
+                    masked_lm_loss = model(input_ids, segment_ids, input_mask, lm_label_ids,
+                                           masked_pos=masked_pos, masked_weights=masked_weights)
+            else:
+                masked_lm_loss = model(input_ids, segment_ids, input_mask, lm_label_ids,
+                                       masked_pos=masked_pos, masked_weights=masked_weights)
             if args.n_gpu > 1:  # mean() to average on multi-gpu.
                 # loss = loss.mean()
                 masked_lm_loss = masked_lm_loss.mean()
@@ -326,15 +335,22 @@ def train(args, model_class, config, train_dataloader, train_sampler):
                 loss = loss / args.gradient_accumulation_steps
 
             if args.fp16:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-                torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
+                # with amp.scale_loss(loss, optimizer) as scaled_loss:
+                #     scaled_loss.backward()
+                scaler.scale(loss).backward()
+                # torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             else:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
 
             if (step + 1) % args.gradient_accumulation_steps == 0:
-                optimizer.step()
+                if args.fp16:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 scheduler.step()  # Update learning rate schedule
                 optimizer.zero_grad()
                 global_step += 1
@@ -351,7 +367,8 @@ def train(args, model_class, config, train_dataloader, train_sampler):
 
             if args.fp16:
                 output_amp_file = os.path.join(args.output_dir, "amp.{0}.bin".format(i_epoch))
-                torch.save(amp.state_dict(), output_amp_file)
+                # torch.save(amp.state_dict(), output_amp_file)
+                torch.save(scaler.state_dict(), output_amp_file)
             output_sched_file = os.path.join(args.output_dir, "sched.{0}.bin".format(i_epoch))
             torch.save(scheduler.state_dict(), output_sched_file)
 

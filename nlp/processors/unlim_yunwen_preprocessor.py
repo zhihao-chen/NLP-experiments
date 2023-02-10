@@ -392,8 +392,7 @@ class Preprocess4Seq2seq(Pipeline):
 
         input_mask = torch.zeros(self.max_len, self.max_len, dtype=torch.long)
         input_mask[:, :len(tokens_a)+2].fill_(1)
-        second_st, second_end = len(
-            tokens_a)+2, len(tokens_a)+len(tokens_b)+3
+        second_st, second_end = len(tokens_a)+2, len(tokens_a)+len(tokens_b)+3
         input_mask[second_st:second_end, second_st:second_end].copy_(
             self._tril_matrix[:second_end-second_st, :second_end-second_st])
 
