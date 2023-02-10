@@ -18,18 +18,22 @@ sys.path.append(os.path.join('/'.join(dirname.split('/')[:-2]), 'nlp'))
 
 from nlp.utils.generate_util import top_filtering
 
-PREFIX = "问题:"
-POSTFIX = " 答案:"
-ROOT_PATH = "/data2/work2/chenzhihao/NLP-experiments/"
-MODEL_CHECKPOINT_PATH = ROOT_PATH + "datas/output_dir/CPM-large2/"
-TOKENIZER_PATH = "/data2/work2/chenzhihao/pretrained_models/CPM-generate"
+# PREFIX = "问题:"
+# POSTFIX = " 答案:"
+PREFIX = "用户："
+POSTFIX = "机器人："
+ROOT_PATH = "/root/work2/work2/chenzhihao/NLP/"
+# MODEL_CHECKPOINT_PATH = ROOT_PATH + "datas/output_dir/CPM-large2/"
+MODEL_CHECKPOINT_PATH = ROOT_PATH + "datas/output_dir/CPM-natural_conv/"
+TOKENIZER_PATH = "/root/work2/work2/chenzhihao/pretrained_models/CPM-generate"
 TOP_K = 1
 TOP_P = 0.0
-TEMPERATURE = 0.9
-DO_SAMPLE = False
-OUTPUT_MAX_LENGTH = 50
-OUTPUT_MIN_LENGTH = 5
-DEVICE = 1  # cpu:-1
+TEMPERATURE = 0.75
+DO_SAMPLE = True
+OUTPUT_MAX_LENGTH = 128
+OUTPUT_MIN_LENGTH = 1
+DEVICE = 7  # cpu:-1
+MULTI_TURN = True
 
 
 def build_input(args, context, reply):
@@ -69,22 +73,31 @@ def generate_sample(args, model, context, current_output=None):
     return current_output
 
 
-def interact(args, model, tokenizer: CpmTokenizer):
-    print("*************** Please input question or q to quit ***********************")
+def interact(args, model, tokenizer: CpmTokenizer, multi_turn=True):
+    print("*************** Please input question or 'stop' to quit ***********************")
+    history = ""
     while True:
-        raw_text = input("\nContext prompt (stop to exit) >>> ")
+        raw_text = input("\n输入：")
         while not raw_text:
             print('Prompt should not be empty!')
-            raw_text = input("\nContext prompt (stop to exit) >>> ")
+            raw_text = input("\n输入：")
         raw_text = raw_text.strip()
         if raw_text == "stop":
             break
-        text = PREFIX + raw_text + POSTFIX
-        input_ids = tokenizer.encode_plus(text, add_special_tokens=False)['input_ids']
+        text = PREFIX + raw_text + "。" + POSTFIX
+        if multi_turn:
+            history += text
+        else:
+            history = text
+        history_len = len(history)
+        input_ids = tokenizer.encode_plus(history, add_special_tokens=False)['input_ids']
         with torch.no_grad():
             output_ids = generate_sample(args, model, input_ids)
         output_text = tokenizer.decode(output_ids, skip_special_tokens=True)
-        print("".join(output_text.split(" ")))
+        result = "".join(output_text.split(" "))
+        if multi_turn:
+            history += result
+        print("回复：", result)
 
 
 def interact_by_pipeline(args, model, tokenizer):
@@ -135,8 +148,10 @@ def mian():
 
     parser.add_argument("--do_sample", type=bool, default=DO_SAMPLE,
                         help="Set to use greedy decoding instead of sampling")
-    parser.add_argument("--output_max_length", type=int, default=256, help="Maximum length of the output utterances")
-    parser.add_argument("--output_min_length", type=int, default=5, help="Minimum length of the output utterances")
+    parser.add_argument("--output_max_length", type=int, default=OUTPUT_MAX_LENGTH,
+                        help="Maximum length of the output utterances")
+    parser.add_argument("--output_min_length", type=int, default=OUTPUT_MIN_LENGTH,
+                        help="Minimum length of the output utterances")
     parser.add_argument("--seed", type=int, default=42, help="Seed")
     parser.add_argument("--temperature", type=float, default=TEMPERATURE, help="Sampling softmax temperature")
     parser.add_argument("--top_k", type=int, default=TOP_K,
@@ -156,8 +171,8 @@ def mian():
     model.to(device)
     model.eval()
 
-    # interact(args, model, tokenizer)
-    interact_by_pipeline(args, model, tokenizer)
+    interact(args, model, tokenizer, multi_turn=MULTI_TURN)
+    # interact_by_pipeline(args, model, tokenizer)
 
 
 if __name__ == "__main__":

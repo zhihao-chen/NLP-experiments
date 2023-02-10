@@ -54,12 +54,15 @@ def load_natural_conv_dataset(dialogue_release, train_path, valid_path, test_pat
     :return:
     """
     id2content = {}
+    max_len = 0
     with codecs.open(dialogue_release, encoding='utf8') as fr:
         dialogue_list = json.load(fr)
         for item in dialogue_list:
             dialog_id = item['dialog_id']
             content = item['content']
             id2content[dialog_id] = content
+            ll = sum([len(c) for c in content])
+            max_len = max(ll, max_len)
 
     def load_samples(input_file):
         samples = []
@@ -72,6 +75,7 @@ def load_natural_conv_dataset(dialogue_release, train_path, valid_path, test_pat
                     sample = id2content[line]
                     samples.append(sample)
         return samples
+    print("max len: ", max_len)
     train_samples = load_samples(train_path)
     print("total train data: ", len(train_samples))
     valid_samples = load_samples(valid_path)
@@ -165,7 +169,7 @@ def evaluate(valid_loader, model, args):
     loss_func = nn.CrossEntropyLoss(ignore_index=-1)
     total_loss = 0.0
     global_steps = 0
-    for step, batch in enumerate(tqdm(valid_loader, desc="Evaluating on QA dataset")):
+    for step, batch in enumerate(tqdm(valid_loader, desc=f"Evaluating on {args.data_type} dataset")):
         input_ids = batch['input_ids'].to(args.device)
         token_type_ids = batch['token_type_ids'].to(args.device)
         lm_labels = batch['labels'].to(args.device)
@@ -236,7 +240,8 @@ def train(train_samples, valid_sample, model, tokenizer, args):
     for epoch in range(args.n_epochs):
         model.train()
         print(f"******Current epoch {epoch}/{args.n_epochs}******")
-        for step, batch in enumerate(tqdm(train_loader, desc="Training CDail-GPT_LCCC-larger in QA dataset")):
+        for step, batch in enumerate(tqdm(train_loader,
+                                          desc=f"Training CDail-GPT_LCCC-larger in {args.data_type} dataset")):
             input_ids = batch['input_ids'].to(args.device)
             token_type_ids = batch['token_type_ids'].to(args.device)
             lm_labels = batch['labels'].to(args.device)
@@ -265,7 +270,7 @@ def train(train_samples, valid_sample, model, tokenizer, args):
                 optimizer.zero_grad()
                 global_steps += 1
 
-            if (step + 1) % args.valid_steps == 0:
+            if (step + 1) % args.valid_steps == 0 or step == len(train_loader)-1:
                 results = evaluate(valid_loader, model, args)
                 valid_loss = results['avg_loss']
                 valid_ppl = results['avg_ppl']
