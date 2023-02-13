@@ -206,8 +206,22 @@ def init_optimizer_and_scheduler(args, model, t_total):
     return optimizer, scheduler
 
 
-def evaluate():
-    pass
+def evaluate(args, model, valid_dataloader):
+    model.eval()
+
+    total_loss = 0.0
+    global_step = 0
+    for batch in tqdm(valid_dataloader, desc="Evaluating"):
+        batch = [t.to(args.device) if t is not None else None for t in batch]
+        input_ids, segment_ids, input_mask, lm_label_ids, masked_pos, masked_weights, _ = batch
+        loss = model(input_ids, segment_ids, input_mask, lm_label_ids, masked_pos=masked_pos,
+                     masked_weights=masked_weights)
+        total_loss += loss.item()
+        global_step += 1
+
+    avg_loss = total_loss / global_step
+    ppl = math.exp(avg_loss)
+    return {'avg_loss': avg_loss, 'ppl': ppl}
 
 
 def train(args, model_class, config, train_dataloader, train_sampler):
@@ -354,6 +368,9 @@ def train(args, model_class, config, train_dataloader, train_sampler):
                 scheduler.step()  # Update learning rate schedule
                 optimizer.zero_grad()
                 global_step += 1
+
+            if args.do_valid and (step + 1) % args.valid_steps == 0 or step == len(train_dataloader) - 1:
+                pass
 
         # Save a trained model
         if args.local_rank == -1 or torch.distributed.get_rank() == 0:
