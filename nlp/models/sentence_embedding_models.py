@@ -967,8 +967,8 @@ class CoSENT(nn.Module):
 
         self.pooler = Pooler(pooler_type=pooler_type)
 
-    def forward(self, input_ids, attention_mask):
-        outputs = self.bert(input_ids, attention_mask, output_hidden_states=True)
+    def forward(self, input_ids, attention_mask, token_type_ids):
+        outputs = self.bert(input_ids, attention_mask, token_type_ids, output_hidden_states=True)
         pooler_output = self.pooler(attention_mask, outputs)
 
         return pooler_output

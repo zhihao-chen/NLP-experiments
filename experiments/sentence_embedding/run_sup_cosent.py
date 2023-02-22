@@ -28,8 +28,6 @@ from nlp.models.sentence_embedding_models import CoSENT
 from nlp.processors.semantic_match_preprocessor import pad_to_maxlen
 from nlp.metrics.sematic_match_metric import compute_corrcoef, compute_pearsonr, l2_normalize
 
-WANDB = None
-
 
 def load_data(path):
     sentence, label = [], []
@@ -59,10 +57,11 @@ def load_test_data(path):
 
 
 class CustomDataset(Dataset):
-    def __init__(self, sentence, label, tokenizer):
+    def __init__(self, sentence, label, tokenizer, max_seq_length=512):
         self.sentence = sentence
         self.label = label
         self.tokenizer = tokenizer
+        self.max_seq_length = max_seq_length
 
     def __len__(self):
         return len(self.sentence)
@@ -71,6 +70,8 @@ class CustomDataset(Dataset):
         inputs = self.tokenizer.encode_plus(
             text=self.sentence[index],
             text_pair=None,
+            truncation=True,
+            max_length=self.max_seq_length,
             add_special_tokens=True,
             return_token_type_ids=True
         )
@@ -140,14 +141,16 @@ def calc_loss(y_true, y_pred, args):
     return torch.logsumexp(y_pred, dim=0)
 
 
-def get_sent_id_tensor(s_list, tokenizer):
+def get_sent_id_tensor(s_list, tokenizer, max_seq_length=512):
     input_ids, attention_mask, token_type_ids, labels = [], [], [], []
     max_len = max([len(_)+2 for _ in s_list])   # 这样写不太合适 后期想办法改一下
+    max_len = min(max_len, max_seq_length)
     for s in s_list:
-        inputs = tokenizer.encode_plus(text=s, text_pair=None, add_special_tokens=True, return_token_type_ids=True)
-        input_ids.append(pad_to_maxlen(inputs['input_ids'], max_len=max_len))
-        attention_mask.append(pad_to_maxlen(inputs['attention_mask'], max_len=max_len))
-        token_type_ids.append(pad_to_maxlen(inputs['token_type_ids'], max_len=max_len))
+        inputs = tokenizer(text=s, add_special_tokens=True, return_token_type_ids=True,
+                           padding='max_length', max_length=max_len, truncation=True)
+        input_ids.append(inputs['input_ids'])
+        attention_mask.append(inputs['attention_mask'])
+        token_type_ids.append(inputs['token_type_ids'])
     all_input_ids = torch.tensor(input_ids, dtype=torch.long)
     all_input_mask = torch.tensor(attention_mask, dtype=torch.long)
     all_segment_ids = torch.tensor(token_type_ids, dtype=torch.long)
@@ -162,7 +165,8 @@ def evaluate(test_dataset, model, tokenizer, args):
     model.eval()
     for step, (s1, s2, lab) in enumerate(tqdm(zip(sent1, sent2, label),
                                          desc=f"Evaluating supCoSENT on {args['data_type']}")):
-        input_ids, input_mask, segment_ids = get_sent_id_tensor([s1, s2], tokenizer)
+        input_ids, input_mask, segment_ids = get_sent_id_tensor([s1, s2], tokenizer,
+                                                                max_seq_length=args['max_seq_length'])
         lab = torch.tensor([lab], dtype=torch.float)
 
         input_ids = input_ids.to(args['device'])
@@ -171,7 +175,7 @@ def evaluate(test_dataset, model, tokenizer, args):
         lab = lab.to(args['device'])
 
         with torch.no_grad():
-            output = model(input_ids=input_ids, attention_mask=input_mask)
+            output = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids)
 
         all_a_vecs.append(output[0].cpu().numpy())
         all_b_vecs.append(output[1].cpu().numpy())
@@ -237,7 +241,8 @@ def get_parameters(model, args):
 
 def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     train_sentence, train_label = train_samples
-    train_dataset = CustomDataset(sentence=train_sentence, label=train_label, tokenizer=tokenizer)
+    train_dataset = CustomDataset(sentence=train_sentence, label=train_label, tokenizer=tokenizer,
+                                  max_seq_length=args['max_seq_length'])
     train_dataloader = DataLoader(dataset=train_dataset, shuffle=False, batch_size=args['train_batch_size'],
                                   collate_fn=collate_fn)
 
@@ -252,12 +257,14 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
 
     args['warmup_steps'] = warmup_steps
     optimizer, scheduler = init_optimizer(t_total, optimizer_grouped_parameters, args)
+    if args['fp16']:
+        from torch.cuda.amp import autocast, GradScaler
+        scaler = GradScaler()
 
-    global WANDB
-    WANDB, run = init_wandb_writer(project_name='semantic_match',
-                                   train_args=train_config,
-                                   group_name="nlp",
-                                   experiment_name="sts-b-sup_cosent-roberta-wwm-ext")
+    wandb_logger, run = init_wandb_writer(project_name=args['project_name'],
+                                          train_args=train_config,
+                                          group_name=args['group_name'],
+                                          experiment_name=args['experiment_name'])
 
     # Train!
     print("***** Running training *****")
@@ -267,12 +274,13 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
     print("  Gradient Accumulation steps = %d", args['gradient_accumulation_steps'])
     print("  Total optimization steps = %d", num_train_optimization_steps)
 
-    WANDB.watch(model, log='all')
+    wandb_logger.watch(model, log='all')
     model.to(args['device'])
     model.zero_grad()
+
+    torch.cuda.empty_cache()
     global_steps = 0
     best_score = 0.0
-    best_score_pearsonr = 0.0
     best_epoch = 0
     set_seed(args['seed'])
 
@@ -280,47 +288,60 @@ def train(train_samples, valid_samples, model, tokenizer, args, train_config):
         model.train()
         total_loss = 0.0
         epoch_steps = 0
-        print(f"******** {epoch}/{args['num_train_epochs']} ********")
         for step, batch in enumerate(tqdm(train_dataloader,
-                                          desc=f"Training supCoSENT on {args['data_type']}")):
+                                          desc=f"Training on epoch {epoch}/{args['num_train_epochs']}")):
             inputs = {
                 'input_ids': batch['input_ids'].to(args['device']),
-                'attention_mask': batch['attention_mask'].to(args['device'])
+                'attention_mask': batch['attention_mask'].to(args['device']),
+                'token_type_ids': batch['segment_ids'].to(args['device'])
             }
             label_ids = batch['labels'].to(args['device'])
-            logits = model(**inputs)
-            loss = calc_loss(label_ids, logits, args)
+            if args['fp16']:
+                logits = model(**inputs)
+                loss = calc_loss(label_ids, logits, args)
+            else:
+                logits = model(**inputs)
+                loss = calc_loss(label_ids, logits, args)
 
             if args['gradient_accumulation_steps'] > 1:
                 loss = loss / args['gradient_accumulation_steps']
-            loss.backward()
+            if args['fp16']:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
             if (step + 1) % args['gradient_accumulation_steps'] == 0:
                 total_loss += loss.item()
-                optimizer.step()
+                if args['fp16']:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 scheduler.step()
                 model.zero_grad()
                 epoch_steps += 1
                 global_steps += 1
-                WANDB.log({'Train/loss': total_loss/epoch_steps})
+                wandb_logger.log({'Train/loss': total_loss/epoch_steps})
 
-            # if (step + 1) % args['eval_steps'] == 0:
-        corrcoef, pearsonr = evaluate(valid_samples, model, tokenizer, args)
-        WANDB.log({'Evaluation/spearman': corrcoef, 'Evaluation/pearsonr': pearsonr}, step=global_steps)
-        print(f"evaluate results: spearman: {corrcoef}\tpearsonr: {pearsonr}")
-        if corrcoef > best_score:
-            best_score = corrcoef
-            best_score_pearsonr = pearsonr
-            best_epoch = best_epoch
+            if (step + 1) % args['eval_steps'] == 0 or step == len(train_dataloader) - 1:
+                corrcoef, pearsonr = evaluate(valid_samples, model, tokenizer, args)
+                wandb_logger.log({'Evaluation/spearman': corrcoef, 'Evaluation/pearsonr': pearsonr}, step=global_steps)
+                print(f"evaluate results: spearman: {corrcoef}\tpearsonr: {pearsonr}")
+                if corrcoef > best_score:
+                    best_score = corrcoef
+                    best_score_pearsonr = pearsonr
+                    best_epoch = best_epoch
 
-            model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
-            output_file = os.path.join(args['model_save_path'], 'pytorch_model.bin')
-            torch.save(model_to_save.state_dict(), output_file)
-            tokenizer.save_pretrained(args['model_save_path'])
-            with codecs.open(os.path.join(args['model_save_path'], "eval_result.txt"), "w", encoding="utf8") as fw:
-                fw.write("best_epoch: {}\tpearsonr: {}\tspearman: {}".format(best_epoch,
-                                                                             best_score_pearsonr,
-                                                                             best_score))
+                    model_to_save = model.module if hasattr(model, 'module') else model  # Only save the model it-self
+                    output_file = os.path.join(args['model_save_path'], 'pytorch_model.bin')
+                    torch.save(model_to_save.state_dict(), output_file)
+                    tokenizer.save_pretrained(args['model_save_path'])
+                    with codecs.open(os.path.join(args['model_save_path'], "eval_result.txt"),
+                                     "w", encoding="utf8") as fw:
+                        fw.write("best_epoch: {}\tpearsonr: {}\tspearman: {}".format(best_epoch,
+                                                                                     best_score_pearsonr,
+                                                                                     best_score))
+                torch.cuda.empty_cache()
 
 
 def main():
@@ -329,8 +350,12 @@ def main():
         'model_type': "roberta-wwm-ext",
         'model_name_or_path': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'output_dir': root_path + "/experiments/output_file_dir/semantic_match",
+        'data_dir': "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/",
         'config_path': None,
         'tokenizer_path': None,
+        'project_name': 'semantic_match',
+        'group_name': 'nlp',
+        'experiment_name': 'feedback-sup_cosent-roberta-wwm-ext',
         'do_train': True,
         'do_test': True,
         'lr_rate': 2e-5,
@@ -339,21 +364,22 @@ def main():
         'adam_epsilon': 1e-8,
         'weight_decay': 0.01,
         'scheduler_type': 'linear',
-        'train_batch_size': 64,  # 必须是2的倍数
-        'valid_batch_size': 64,
-        'test_batch_size': 64,
-        'num_train_epochs': 30,
+        'train_batch_size': 128,  # 必须是2的倍数
+        'valid_batch_size': 128,
+        'test_batch_size': 128,
+        'num_train_epochs': 200,
         'max_seq_length': 128,
-        'eval_steps': 500,
+        'eval_steps': 3000,
         'object_type': "classification",  # classification, regression, triplet
         'task_type': "match",  # "match" or "nli"
-        'pooling_strategy': "cls",  # first-last-avg, last-avg, cls, pooler
-        'data_type': "STS-B",  # ATEC, BQ, LCQMC, PAWSX, STS-B
-        'train_dataset': "train.data",
-        'valid_dataset': "valid.data",
-        'test_dataset': "test.data",
-        'cuda_number': "3",
+        'pooling_strategy': "last-avg",  # first-last-avg, last-avg, cls, pooler
+        'data_type': "ATEC",  # ATEC, BQ, LCQMC, PAWSX, STS-B
+        'train_dataset': ".train.data",
+        'valid_dataset': ".valid.data",
+        'test_dataset': ".test.data",
+        'cuda_number': "4",
         'num_worker': 4,
+        'fp16': True,
         'seed': 2333
     }
     train_config = {
@@ -365,7 +391,7 @@ def main():
         'scheduler_type': config['scheduler_type']
     }
 
-    data_dir = "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/" + config['data_type']
+    data_dir = config['data_dir'] + config['data_type']
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
     model_save_path = f"{config['output_dir']}/{config['data_type']}-supcosent-{config['model_type']}"
@@ -376,9 +402,13 @@ def main():
     device = torch.device(f"cuda:{config['cuda_number']}") if torch.cuda.is_available() else torch.device('cpu')
     config['device'] = device
 
-    train_samples = load_data(os.path.join(data_dir, config['data_type']+'.'+config['train_dataset']))
-    valid_samples = load_test_data(os.path.join(data_dir, config['data_type']+'.'+config['valid_dataset']))
-    test_samples = load_test_data(os.path.join(data_dir, config['data_type']+'.'+config['test_dataset']))
+    train_file_path = os.path.join(data_dir, config['data_type'] + config['train_dataset'])
+    valid_file_path = os.path.join(data_dir, config['data_type'] + config['valid_dataset'])
+    test_file_path = os.path.join(data_dir, config['data_type'] + config['test_dataset'])
+
+    train_samples = load_data(train_file_path)
+    valid_samples = load_test_data(valid_file_path)
+    test_samples = load_test_data(test_file_path)
 
     tokenizer = BertTokenizer.from_pretrained(config['model_name_or_path']
                                               if not config['tokenizer_path'] else config['tokenizer_path'])

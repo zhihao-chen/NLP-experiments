@@ -73,7 +73,6 @@ def prepare_snli_datasets(data_dir, prefix='cnsd_snli_v1.0'):
     test_data_lst = load_data_for_snli(test_data_path, return_list=True)
 
     all_datas = train_data_lst + dev_data_lst + test_data_lst
-
     train_data = {}
     for item in all_datas:
         s1 = item['sentence1'].strip()
@@ -123,7 +122,8 @@ def train(train_samples, model, dev_evaluator, args):  # noqa
               epochs=args['num_epochs'],
               evaluation_steps=evaluation_steps,
               warmup_steps=warmup_steps,
-              show_progress_bar=False,
+              show_progress_bar=True,
+              save_best_model=True,
               output_path=args['model_save_path'],
               optimizer_params={'lr': args['lr_rate']},
               use_amp=args['use_amp']  # Set to True, if your GPU supports FP16 cores
@@ -138,31 +138,30 @@ def test_model(model_save_path, test_evaluator):
 
 def main():
     config = {
-        'model_type': "roberta",
-        'model_name': "/data2/work2/chenzhihao/NLP/pretrained_models/chinese-roberta-wwm-ext",
+        'model_type': "chinese-roberta-wwm-ext",
+        'model_name': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
         'lr_rate': 2e-5,
         'gradient_accumulation_steps': 1,
         'warmup_ratio': 0.1,
-        'use_amp': False,
-        'batch_size': 64,
-        'num_epochs': 30,
+        'use_amp': True,
+        'batch_size': 256,
+        'num_epochs': 100,
         'max_seq_length': 64,
         'train_data_type': "SNLI",
         'data_type': "STS-B",  # ATEC, BQ, LCQMC, PAWSX, STS-B, SNLI, MNLI
         'object_type': "triplet",  # classifier, regression, triplet, multi_neg_rank
-        'train_dataset': "train.data",
-        'valid_dataset': "valid.data",
-        'test_dataset': "test.data",
+        'train_dataset': ".train.data",
+        'valid_dataset': ".valid.data",
+        'test_dataset': ".test.data",
         'cuda_number': 0
     }
 
-    root_path = "/data2/work2/chenzhihao/NLP"
-    data_dir = "/data2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/"
+    root_path = "/root/work2/work2/chenzhihao/NLP"
+    data_dir = "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/"
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
     output_dir = root_path + "/experiments/output_file_dir/semantic_match"
-    date = datetime.now().strftime("%Y-%m-%d_%H")
-    model_save_path = output_dir + f"/{config['train_data_type']}-sup_simcse-{config['model_type']}-{date}"
+    model_save_path = output_dir + f"/{config['train_data_type']}-sup_simcse-{config['model_type']}"
     config['model_save_path'] = model_save_path
     if not os.path.exists(model_save_path):
         os.makedirs(model_save_path)
@@ -171,21 +170,18 @@ def main():
     # 初始化模型
     model = init_model(config['model_name'], device, config['max_seq_length'])
 
+    train_file = os.path.join(data_dir, config['data_type'], config['data_type']+config['train_dataset'])
+    valid_file = os.path.join(data_dir, config['data_type'], config['data_type']+config['valid_dataset'])
+    test_file = os.path.join(data_dir, config['data_type'], config['data_type']+config['test_dataset'])
+
     # 准备数据
-    # train_samples = prepare_datasets(os.path.join(data_dir, config['data_type']+'.'+config['train_dataset']),
-    #                                  data_type=config['data_type'],
-    #                                  object_type=config['object_type'])
+    # train_samples = prepare_datasets(train_file, data_type=config['data_type'], object_type=config['object_type'])
     # 训练集是SNLI数据集
     train_samples = prepare_snli_datasets(os.path.join(data_dir, config['train_data_type']))
+    # train_samples = prepare_snli_datasets(data_dir, prefix=config['train_data_type'])
     # 验证集和测试集是STS-B数据集
-    valid_samples = prepare_datasets(os.path.join(data_dir, config['data_type'],
-                                                  config['data_type']+'.'+config['valid_dataset']),
-                                     data_type=config['data_type'],
-                                     object_type=config['object_type'])
-    test_samples = prepare_datasets(os.path.join(data_dir, config['data_type'],
-                                                 config['data_type']+'.'+config['test_dataset']),
-                                    data_type=config['data_type'],
-                                    object_type=config['object_type'])
+    valid_samples = prepare_datasets(valid_file, data_type=config['data_type'], object_type=config['object_type'])
+    test_samples = prepare_datasets(test_file, data_type=config['data_type'], object_type=config['object_type'])
 
     # 初始化评估器
     valid_evaluator = EmbeddingSimilarityEvaluator.from_input_examples(

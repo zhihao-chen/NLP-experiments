@@ -9,6 +9,7 @@ GROUP_NAME='nlp'
 MODEL_TYPE='roberta-wwm-ext'
 DATA_TYPE='ATEC'
 
+
 python $PROJECT_PATH/experiments/sentence_embedding/run_pair_sup_con.py \
   --model_type=$MODEL_TYPE \
   --model_name_or_path=$MODEL_PATH \
@@ -21,19 +22,23 @@ python $PROJECT_PATH/experiments/sentence_embedding/run_pair_sup_con.py \
   --do_train \
   --do_valid \
   --do_test \
-  --max_seq_length=64 \
+  --train_dataset='train.txt' \
+  --valid_dataset='dev.txt' \
+  --test_dataset='test.txt' \
+  --max_seq_length=128 \
   --lr_rate=5e-05 \
   --lr_scale 100 \
   --gradient_accumulation_steps=1 \
   --scheduler_type='linear' \
-  --train_batch_size=256 \
-  --valid_batch_size=128 \
+  --train_batch_size=64 \
+  --valid_batch_size=64 \
   --num_train_epochs=200 \
-  --gpuid=4 \
+  --gpuid=0 \
   --seed=2333 \
   --num_worker=0 \
   --num_labels=2 \
   --temperature=0.05 \
   --task_type='pairsupcon' \
   --contrast_type="HardNeg" \
-  --beta=1
+  --beta=1 \
+  --fp16

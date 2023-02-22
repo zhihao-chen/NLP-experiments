@@ -57,9 +57,9 @@ def get_args():
     parser.add_argument('--data_type', default='STS-B', type=str)
     parser.add_argument('--object_type', default='classifier', type=str,
                         choices=["classifier", "regression", "triplet", "multi_neg_rank"])
-    parser.add_argument('--train_dataset', default="train.data", type=str)
-    parser.add_argument('--valid_dataset', default="valid.data", type=str)
-    parser.add_argument('--test_dataset', default="test.data", type=str)
+    parser.add_argument('--train_dataset', default=None, type=str)
+    parser.add_argument('--valid_dataset', default=None, type=str)
+    parser.add_argument('--test_dataset', default=None, type=str)
     parser.add_argument('--max_seq_length', type=int, default=32)
     parser.add_argument('--pad_to_max_length', action='store_true', help="")
     # Training parameters
@@ -86,6 +86,7 @@ def get_args():
     parser.add_argument('--feat_dim', type=int, default=128,
                         help="dimension of the projected features for instance discrimination loss")
     parser.add_argument('--beta', type=float, default=1, help=" ")
+    parser.add_argument('--fp16', action='store_true')
 
     args = parser.parse_args()
     args.use_gpu = args.gpuid >= 0
@@ -114,15 +115,15 @@ def init_model(model_path, num_labels, args, flag='train'):
 
 def init_optimizer(total, model: PairSupConBert, args):
     if args.task_type == "contrastive":
-        optimizer = torch.optim.Adam([
+        optimizer = Adam([
             {'params': model.bert.parameters()},
             {'params': model.contrast_head.parameters(), 'lr': args.lr_rate * args.lr_scale}], lr=args.lr_rate)
     elif args.task_type == "classification":
-        optimizer = torch.optim.Adam([
+        optimizer = Adam([
             {'params': model.bert.parameters()},
             {'params': model.classify_head.parameters(), 'lr': args.lr_rate * args.lr_scale}], lr=args.lr_rate)
     elif args.task_type == "pairsupcon":
-        optimizer = torch.optim.Adam([
+        optimizer = Adam([
             {'params': model.bert.parameters()},
             {'params': model.classify_head.parameters(), 'lr': args.lr_rate * args.lr_scale},
             {'params': model.contrast_head.parameters(), 'lr': args.lr_rate * args.lr_scale}], lr=args.lr_rate)
@@ -187,13 +188,18 @@ def train(args, train_samples, valid_samples, model, tokenizer):
     args.warmup_steps = warmup_steps
     optimizer, scheduler = init_optimizer(t_total, model, args)
 
+    if args.fp16:
+        from torch.cuda.amp import autocast, GradScaler
+        scaler = GradScaler()
+
     train_config = {
         'lr_rate': args.lr_rate,
         'gradient_accumulation_steps': args.gradient_accumulation_steps,
         'warmup_ratio': args.warmup_ratio,
         'adam_epsilon': args.adam_epsilon,
         'weight_decay': args.weight_decay,
-        'scheduler_type': args.scheduler_type
+        'scheduler_type': args.scheduler_type,
+        'fp16': args.fp16
     }
 
     wandb_tacker, _ = init_wandb_writer(
@@ -224,18 +230,33 @@ def train(args, train_samples, valid_samples, model, tokenizer):
             }
             label = batch['label'].to(args.device)
             if args.task_type == 'classification':
-                classify_pred = model(**inputs)
-                loss = mle_loss_func(classify_pred, label)
+                if args.fp16:
+                    with autocast():
+                        classify_pred = model(**inputs)
+                        loss = mle_loss_func(classify_pred, label)
+                else:
+                    classify_pred = model(**inputs)
+                    loss = mle_loss_func(classify_pred, label)
                 losses = {"classification_loss": loss}
             elif args.task_type == 'contrastive':
-                feat1, feat2 = model(**inputs)
-                losses = inst_disc_loss_func(feat1, feat2, label)
+                if args.fp16:
+                    with autocast():
+                        feat1, feat2 = model(**inputs)
+                        losses = inst_disc_loss_func(feat1, feat2, label)
+                else:
+                    feat1, feat2 = model(**inputs)
+                    losses = inst_disc_loss_func(feat1, feat2, label)
                 loss = losses['instdisc_loss']
             elif args.task_type == "pairsupcon":
-                classify_pred, feat1, feat2 = model(**inputs)
-                classify_loss = mle_loss_func(classify_pred, label)
-
-                losses = inst_disc_loss_func(feat1, feat2, label)
+                if args.fp16:
+                    with autocast():
+                        classify_pred, feat1, feat2 = model(**inputs)
+                        classify_loss = mle_loss_func(classify_pred, label)
+                        losses = inst_disc_loss_func(feat1, feat2, label)
+                else:
+                    classify_pred, feat1, feat2 = model(**inputs)
+                    classify_loss = mle_loss_func(classify_pred, label)
+                    losses = inst_disc_loss_func(feat1, feat2, label)
                 loss = args.beta * losses["instdisc_loss"]
 
                 loss += classify_loss
@@ -243,13 +264,20 @@ def train(args, train_samples, valid_samples, model, tokenizer):
                 losses["loss"] = loss
             else:
                 raise Exception("Please specify the loss type!")
-            loss.backward()
+            if args.fp16:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
 
             total_loss += loss.item()
             epoch_steps += 1
 
             if (step + 1) % args.gradient_accumulation_steps == 0:
-                optimizer.step()
+                if args.fp16:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
                 global_steps += 1
@@ -287,7 +315,7 @@ def main():
 
     set_seed(args.seed)
 
-    data_dir = os.path.join(args.data_dir, args.data_type)
+    data_dir = args.data_dir
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
     model_save_path = f"{args.output_dir}/{args.data_type}-pairsupcon-{args.model_type}"
@@ -299,8 +327,14 @@ def main():
     args.device = device
 
     logger.info("******** load datasets *********")
-    train_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.' + args.train_dataset))
-    valid_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.' + args.valid_dataset))
+    if args.train_dataset is not None:
+        train_samples = prepare_datasets(os.path.join(data_dir, args.train_dataset))
+    else:
+        train_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.train.data'))
+    if args.valid_dataset is not None:
+        valid_samples = prepare_datasets(os.path.join(data_dir, args.valid_dataset))
+    else:
+        valid_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.test.data'))
 
     logger.info("********* load model ***********")
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path)
@@ -311,7 +345,10 @@ def main():
         best_score, best_epoch = train(args, train_samples, valid_samples, model, tokenizer)
         logger.info(f"best score: {best_score}\tbest epoch: {best_epoch}")
     if args.do_test:
-        test_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.' + args.test_dataset))
+        if args.test_dataset is not None:
+            test_samples = prepare_datasets(os.path.join(data_dir, args.test_dataset))
+        else:
+            test_samples = prepare_datasets(os.path.join(data_dir, args.data_type + '.test.data'))
         test_dataset = SentDataSet(dataset=test_samples, tokenizer=tokenizer, max_seq_length=args.max_seq_length,
                                    task_type='match')
         test_dataloader = DataLoader(test_dataset, batch_size=args.valid_batch_size,

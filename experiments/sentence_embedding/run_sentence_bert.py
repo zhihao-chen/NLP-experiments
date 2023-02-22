@@ -11,7 +11,6 @@ import os
 import sys
 import math
 import logging
-from datetime import datetime
 
 import torch
 from sentence_transformers import InputExample, SentenceTransformer, LoggingHandler, models
@@ -28,10 +27,10 @@ logging.basicConfig(format='%(asctime)s - %(message)s',
                     handlers=[LoggingHandler()])
 
 TRAIN_CONFIG = {
-    'lr_rate': 2e-5,
+    'lr_rate': 5e-6,
     'gradient_accumulation_steps': 1,
     'warmup_ratio': 0.1,
-    'use_amp': False
+    'use_amp': True
 }
 
 
@@ -86,7 +85,8 @@ def train(train_samples, model, dev_evaluator, args):
               epochs=args['num_epochs'],
               evaluation_steps=evaluation_steps,
               warmup_steps=warmup_steps,
-              show_progress_bar=False,
+              show_progress_bar=True,
+              save_best_model=True,
               output_path=args['model_save_path'],
               optimizer_params={'lr': TRAIN_CONFIG['lr_rate']},
               use_amp=TRAIN_CONFIG['use_amp']  # Set to True, if your GPU supports FP16 cores
@@ -101,22 +101,23 @@ def test_model(model_save_path, test_evaluator):
 
 def main():
     config = {
-        'model_type': "roberta",
-        'model_name': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext",
+        'model_type': "chinese-roberta-wwm-ext-large",
+        'model_name': "/root/work2/work2/chenzhihao/pretrained_models/chinese-roberta-wwm-ext-large",
+        'data_dir': "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/",
         'batch_size': 64,
-        'num_epochs': 30,
-        'max_seq_length': 64,
-        'data_type': "STS-B",  # ATEC, BQ, LCQMC, PAWSX, STS-B
+        'num_epochs': 100,
+        'max_seq_length': 128,
+        'data_type': "ATEC",  # ATEC, BQ, LCQMC, PAWSX, STS-B
         'pooler': "mean",  # mean, cls, max
-        'object_type': "regression",  # classifier, regression, triplet
-        'train_dataset': "train.data",
-        'valid_dataset': "valid.data",
-        'test_dataset': "test.data",
+        'object_type': "classification",  # classification, regression, triplet
+        'train_dataset': ".train.data",
+        'valid_dataset': ".valid.data",
+        'test_dataset': ".test.data",
         'cuda_number': 1
     }
 
     root_path = "/root/work2/work2/chenzhihao/NLP"
-    data_dir = "/root/work2/work2/chenzhihao/datasets/chinese-semantics-match-dataset/" + config['data_type']
+    data_dir = config['data_dir'] + config['data_type']
     if not os.path.exists(data_dir):
         raise ValueError(f"The path of '{data_dir}' not exist")
     output_dir = root_path + "/experiments/output_file_dir/semantic_match"
@@ -129,16 +130,14 @@ def main():
     # 初始化模型
     model = init_model(config['model_name'], device, config['max_seq_length'], pool_type=config['pooler'])
 
+    train_file_path = os.path.join(data_dir, config['data_type']+config['train_dataset'])
+    valid_file_path = os.path.join(data_dir, config['data_type']+config['valid_dataset'])
+    test_file_path = os.path.join(data_dir, config['data_type']+config['test_dataset'])
+
     # 准备数据
-    train_samples = prepare_datasets(os.path.join(data_dir, config['data_type']+'.'+config['train_dataset']),
-                                     data_type=config['data_type'],
-                                     object_type=config['object_type'])
-    valid_samples = prepare_datasets(os.path.join(data_dir, config['data_type']+'.'+config['valid_dataset']),
-                                     data_type=config['data_type'],
-                                     object_type=config['object_type'])
-    test_samples = prepare_datasets(os.path.join(data_dir, config['data_type']+'.'+config['test_dataset']),
-                                    data_type=config['data_type'],
-                                    object_type=config['object_type'])
+    train_samples = prepare_datasets(train_file_path, data_type=config['data_type'], object_type=config['object_type'])
+    valid_samples = prepare_datasets(valid_file_path, data_type=config['data_type'], object_type=config['object_type'])
+    test_samples = prepare_datasets(test_file_path, data_type=config['data_type'], object_type=config['object_type'])
 
     # 初始化评估器
     valid_evaluator = EmbeddingSimilarityEvaluator.from_input_examples(
