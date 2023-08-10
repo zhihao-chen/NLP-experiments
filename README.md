@@ -13,3 +13,6 @@
 
 ## 语义匹配
 相关实验在`experiments/sentence_embedding`
+
+## 文本生成模型和LLM模型微调
+相关实验在`experiments/qa_and_text_generation`
